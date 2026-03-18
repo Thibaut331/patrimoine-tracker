@@ -199,6 +199,10 @@ tbody td{padding:10px 10px;vertical-align:middle;}
       <svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12l4-4 3 3 5-6"/></svg>
       Mes actifs
     </div>
+    <div class="nav-item" onclick="goPage('pea',this)">
+      <svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1,11 5,7 8,10 13,3"/><polyline points="10,3 13,3 13,6"/></svg>
+      Mon PEA <span class="live-badge">LIVE</span>
+    </div>
     <div class="nav-item" onclick="goPage('immo',this)">
       <svg class="nav-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 14h14M3 14V7l5-4 5 4v7M6 14v-3h4v3"/></svg>
       Immobilier
@@ -279,6 +283,54 @@ tbody td{padding:10px 10px;vertical-align:middle;}
       </div>
       <div class="tbl-wrap" id="actifs-table"></div>
     </div>
+  </div>
+
+  <!-- PEA -->
+  <div class="page" id="page-pea">
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:.73rem;color:var(--t3)" id="pp-source">Cours Yahoo Finance · temps réel</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="pp-countdown" class="pea-refresh" style="display:none"></span>
+        <button class="mbtn mbtn-cancel" style="font-size:.73rem;padding:5px 10px" onclick="ppRefresh()">&#8635; Actualiser</button>
+      </div>
+    </div>
+    <!-- KPIs -->
+    <div class="pea-kpi" style="margin-bottom:14px">
+      <div class="fi-m"><div class="fi-ml">Valorisation totale</div><div class="fi-mv" style="color:var(--teal)" id="pp-val">—</div></div>
+      <div class="fi-m"><div class="fi-ml">Versements</div><div class="fi-mv" id="pp-vers">—</div></div>
+      <div class="fi-m"><div class="fi-ml">Gain total</div><div class="fi-mv" id="pp-gain">—</div></div>
+      <div class="fi-m"><div class="fi-ml">Performance</div><div class="fi-mv" id="pp-perf">—</div></div>
+    </div>
+    <!-- Chart + Top positions -->
+    <div class="g2" style="margin-bottom:14px">
+      <div class="card"><div class="card-title">Répartition ETF / Actions</div><div style="height:180px"><canvas id="ppPieChart"></canvas></div></div>
+      <div class="card"><div class="card-title">Classement des positions</div><div id="pp-top3"><div class="empty">Chargement…</div></div></div>
+    </div>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" onclick="ppTab('etf',this)">ETF</button>
+      <button class="tab" onclick="ppTab('actions',this)">Actions</button>
+      <button class="tab" onclick="ppTab('gerer',this)">⚙ Gérer les positions</button>
+    </div>
+    <!-- ETF -->
+    <div class="card" id="pp-etf">
+      <div class="tbl-wrap">
+        <table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th></tr></thead>
+        <tbody id="pp-etf-body"><tr><td colspan="7" class="empty">Chargement…</td></tr></tbody></table>
+      </div>
+      <div id="pp-etf-total" style="text-align:right;font-size:.8rem;color:var(--t2);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"></div>
+    </div>
+    <!-- Actions -->
+    <div class="card" id="pp-actions" style="display:none">
+      <div class="tbl-wrap">
+        <table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th></tr></thead>
+        <tbody id="pp-act-body"><tr><td colspan="7" class="empty">Chargement…</td></tr></tbody></table>
+      </div>
+      <div id="pp-act-total" style="text-align:right;font-size:.8rem;color:var(--t2);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"></div>
+    </div>
+    <!-- Gérer -->
+    <div class="card" id="pp-gerer" style="display:none"></div>
   </div>
 
   <!-- IMMO -->
@@ -433,6 +485,7 @@ tbody td{padding:10px 10px;vertical-align:middle;}
 const SK = 'ptv5';
 const SHEET_ID = '1y84YHL44yMqyeuRw9UxJMRwQ3S7GYsNRbXVHR9IBJAQ';
 const TODAY = new Date().toISOString().slice(0, 10);
+const TWELVE_KEY = '81975683bf1143fc833b216731d339f2';
 
 // ─── ÉTAT PAR DÉFAUT ────────────────────────────────────────────────────────────
 const DEFAULT = {
@@ -503,9 +556,10 @@ function mkChart(id, cfg) {
 }
 
 // ─── NAVIGATION ─────────────────────────────────────────────────────────────────
-const PAGE_TITLES = {dashboard:'Dashboard',actifs:'Mes actifs',immo:'Immobilier',fi:'Liberté financière',diversification:'Diversification'};
+const PAGE_TITLES = {dashboard:'Dashboard',actifs:'Mes actifs',pea:'Mon PEA — Suivi temps réel',immo:'Immobilier',fi:'Liberté financière',diversification:'Diversification'};
 
 function goPage(id, el) {
+  if (id !== 'pea') { clearInterval(_ppTimer); _ppTimer = null; }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   E('page-' + id).classList.add('active');
@@ -515,7 +569,7 @@ function goPage(id, el) {
 }
 
 function renderPage(id) {
-  const pages = {dashboard:renderDashboard, actifs:renderActifs, immo:renderImmo, fi:renderFI, diversification:renderDiv};
+  const pages = {dashboard:renderDashboard, actifs:renderActifs, pea:renderPEAPage, immo:renderImmo, fi:renderFI, diversification:renderDiv};
   if (pages[id]) pages[id]();
 }
 
@@ -929,6 +983,16 @@ function peaTab(tab, el) {
   if (tab==='gerer') renderPeaManage();
 }
 
+// Twelve Data — source principale (temps réel, clé API dédiée)
+async function _fetchTwelveData(symbol) {
+  const r = await fetch(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${TWELVE_KEY}`, { signal: AbortSignal.timeout(6000) });
+  if (!r.ok) return null;
+  const d = await r.json();
+  if (d.code || !d.price) return null;
+  return parseFloat(d.price);
+}
+
+// Yahoo Finance — fallback CORS
 async function fetchYahooPrice(ticker) {
   const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
   try {
@@ -939,13 +1003,31 @@ async function fetchYahooPrice(ticker) {
       if (price != null) return price;
     }
   } catch(e) {}
-  // Fallback via proxy CORS public
   const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`;
   const r2 = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
   const d2 = await r2.json();
   const price2 = d2?.chart?.result?.[0]?.meta?.regularMarketPrice;
   if (price2 == null) throw new Error(`Cours introuvable pour ${ticker}`);
   return price2;
+}
+
+// fetchPrice : Twelve Data en priorité, Yahoo en fallback
+async function fetchPrice(ticker) {
+  // Essai avec le ticker tel quel (ex: CW8.PA)
+  try {
+    const p = await _fetchTwelveData(ticker);
+    if (p != null) return p;
+  } catch(e) {}
+  // Essai format EPA (ex: CW8.PA → CW8:EPA)
+  if (ticker.endsWith('.PA')) {
+    try {
+      const sym = ticker.replace('.PA', ':EPA');
+      const p = await _fetchTwelveData(sym);
+      if (p != null) return p;
+    } catch(e) {}
+  }
+  // Fallback Yahoo Finance
+  return fetchYahooPrice(ticker);
 }
 
 function _buildPeaRows(lignes, bodyId, totalId) {
@@ -1003,7 +1085,7 @@ async function _loadPeaYahoo() {
   E('pea-val').textContent = '…'; E('pea-val').style.color = 'var(--teal)';
   E('pea-gain').textContent = '…'; E('pea-perf').textContent = '…';
   await Promise.allSettled(peaLignes.map(async l => {
-    try { l._price = await fetchYahooPrice(l.ticker); }
+    try { l._price = await fetchPrice(l.ticker); }
     catch(e) { l._err = true; console.warn(`[PEA] ${l.ticker}: ${e.message}`); }
   }));
   let totLive = 0;
@@ -1019,7 +1101,7 @@ async function _loadPeaYahoo() {
     E('pea-perf').style.color = perf >= 0 ? 'var(--green)' : 'var(--red)';
     if (peaActif) { peaActif.val = Math.round(totLive * 100) / 100; save(); renderDashboard(); }
   }
-  E('pea-source-note').textContent = `Yahoo Finance · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+  E('pea-source-note').textContent = `Twelve Data · Yahoo Finance (fallback) · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
 }
 
 async function _loadPeaSheet() {
@@ -1129,6 +1211,196 @@ function delPeaLigne(i) {
   peaLignes.splice(i, 1);
   savePeaLignes();
   _renderPeaLigneList();
+}
+
+// ─── PEA PAGE ────────────────────────────────────────────────────────────────────
+let _ppTimer = null, _ppCd = 0;
+
+function ppTab(tab, el) {
+  document.querySelectorAll('#page-pea .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  E('pp-etf').style.display = tab === 'etf' ? 'block' : 'none';
+  E('pp-actions').style.display = tab === 'actions' ? 'block' : 'none';
+  E('pp-gerer').style.display = tab === 'gerer' ? 'block' : 'none';
+  if (tab === 'gerer') renderPpManage();
+}
+
+function ppRefresh() { _ppCd = 60; _loadPpData(); }
+
+function renderPEAPage() {
+  clearInterval(_ppTimer);
+  _ppCd = 60;
+  _loadPpData();
+  _ppTimer = setInterval(() => {
+    _ppCd--;
+    const el = E('pp-countdown');
+    if (el) { el.style.display = 'inline'; el.textContent = `↻ ${_ppCd}s`; }
+    if (_ppCd <= 0) { _ppCd = 60; _loadPpData(); }
+  }, 1000);
+}
+
+function _ppBuildRows(lignes, bodyId, totalId) {
+  const fmtPea = n => n != null && !isNaN(n) ? fmtD(n) : '—';
+  const tbody = E(bodyId);
+  if (!tbody) return 0;
+  if (!lignes.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Aucune position. Ajoutez-en dans ⚙ Gérer les positions.</td></tr>';
+    if (E(totalId)) E(totalId).innerHTML = '';
+    return 0;
+  }
+  let html = '', totAchat = 0, totLive = 0, totGain = 0;
+  for (const l of lignes) {
+    const loading = l._price == null && !l._err;
+    const prixLive = l._price;
+    const achat = l.pru * l.qte;
+    const somLive = prixLive != null ? prixLive * l.qte : null;
+    const gp = somLive != null ? somLive - achat : null;
+    const evolPct = gp != null && achat > 0 ? gp / achat : null;
+    totAchat += achat;
+    if (somLive != null) { totLive += somLive; totGain += gp; }
+    const pos = gp == null ? true : gp >= 0;
+    html += `<tr>
+      <td><div class="aname" style="font-size:.8rem">${l.nom}</div><div class="pea-ticker">${l.ticker}</div></td>
+      <td class="vmut">${l.qte}</td>
+      <td class="vmut">${fmtPea(l.pru)}</td>
+      <td style="font-weight:600">${loading ? '<span style="color:var(--t3)">…</span>' : l._err ? '<span style="color:var(--red);font-size:.7rem">Err</span>' : fmtPea(prixLive)}</td>
+      <td style="font-weight:600;color:var(--teal)">${somLive != null ? fmtPea(somLive) : '—'}</td>
+      <td><span class="${pos?'vpos':'vneg'}">${gp != null ? (pos?'+':'') + fmtD(gp) : '—'}</span></td>
+      <td><span class="${pos?'vpos':'vneg'}" style="font-weight:600">${evolPct != null ? (pos?'+':'') + (evolPct*100).toFixed(2)+'%' : '—'}</span></td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+  if (E(totalId)) E(totalId).innerHTML = `Achat : <strong style="color:var(--t2);margin:0 10px">${fmtD(totAchat)}</strong> Live : <strong style="color:var(--teal);margin:0 10px">${fmtD(totLive)}</strong> Gain : <strong style="color:${totGain>=0?'var(--green)':'var(--red)'}">${totGain>=0?'+':''}${fmtD(totGain)}</strong>`;
+  return totLive;
+}
+
+async function _loadPpData() {
+  if (!peaLignes.length) {
+    ['pp-etf-body','pp-act-body'].forEach(id => { if (E(id)) E(id).innerHTML = '<tr><td colspan="7" class="empty">Aucune position. Ajoutez-en dans ⚙ Gérer les positions.</td></tr>'; });
+    if (E('pp-val')) E('pp-val').textContent = '—';
+    if (E('pp-source')) E('pp-source').textContent = 'Aucune position configurée — ajoutez vos lignes dans ⚙ Gérer les positions';
+    if (E('pp-top3')) E('pp-top3').innerHTML = '<div class="empty">Aucune position configurée.</div>';
+    return;
+  }
+  const etfs = peaLignes.filter(l => l.type === 'etf');
+  const actions = peaLignes.filter(l => l.type === 'action');
+  peaLignes.forEach(l => { l._price = null; l._err = false; });
+  _ppBuildRows(etfs, 'pp-etf-body', 'pp-etf-total');
+  _ppBuildRows(actions, 'pp-act-body', 'pp-act-total');
+
+  const peaActif = state.actifs.find(a => a.nom.toLowerCase().includes('pea'));
+  const vers = peaActif?.pr ?? peaLignes.reduce((s, l) => s + l.pru * l.qte, 0);
+  if (E('pp-vers')) E('pp-vers').textContent = fmtD(vers);
+  if (E('pp-val')) { E('pp-val').textContent = '…'; E('pp-val').style.color = 'var(--teal)'; }
+  if (E('pp-gain')) E('pp-gain').textContent = '…';
+  if (E('pp-perf')) E('pp-perf').textContent = '…';
+
+  await Promise.allSettled(peaLignes.map(async l => {
+    try { l._price = await fetchPrice(l.ticker); }
+    catch(e) { l._err = true; console.warn(`[PEA] ${l.ticker}: ${e.message}`); }
+  }));
+
+  let totLive = 0;
+  totLive += _ppBuildRows(etfs, 'pp-etf-body', 'pp-etf-total');
+  totLive += _ppBuildRows(actions, 'pp-act-body', 'pp-act-total');
+  const totGain = peaLignes.reduce((s, l) => l._price != null ? s + (l._price * l.qte - l.pru * l.qte) : s, 0);
+
+  if (totLive > 0) {
+    if (E('pp-val')) E('pp-val').textContent = fmtD(totLive);
+    if (E('pp-gain')) { E('pp-gain').textContent = (totGain >= 0 ? '+' : '') + fmtD(totGain); E('pp-gain').style.color = totGain >= 0 ? 'var(--green)' : 'var(--red)'; }
+    if (E('pp-perf') && vers > 0) { const perf = totGain / vers; E('pp-perf').textContent = (perf >= 0 ? '+' : '') + (perf * 100).toFixed(2) + '%'; E('pp-perf').style.color = perf >= 0 ? 'var(--green)' : 'var(--red)'; }
+    if (peaActif) { peaActif.val = Math.round(totLive * 100) / 100; save(); }
+  }
+
+  // Pie chart ETF vs Actions
+  const etfLive = etfs.reduce((s, l) => s + (l._price != null ? l._price * l.qte : l.pru * l.qte), 0);
+  const actLive = actions.reduce((s, l) => s + (l._price != null ? l._price * l.qte : l.pru * l.qte), 0);
+  if (E('ppPieChart') && (etfLive + actLive) > 0) {
+    mkChart('ppPieChart', {
+      type: 'doughnut',
+      data: { labels: ['ETF', 'Actions'], datasets: [{ data: [etfLive, actLive], backgroundColor: ['#6c63f5','#2dd4bf'], borderWidth: 0, hoverOffset: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: { legend: { position: 'bottom', labels: { color: 'rgba(255,255,255,0.35)', boxWidth: 10, font: { size: 10 } } }, tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.parsed) } } } }
+    });
+  }
+
+  // Classement par performance
+  const ranked = [...peaLignes].filter(l => l._price != null)
+    .map(l => ({ ...l, gainPct: (l._price * l.qte - l.pru * l.qte) / (l.pru * l.qte), gain: l._price * l.qte - l.pru * l.qte }))
+    .sort((a, b) => b.gainPct - a.gainPct);
+  if (E('pp-top3')) {
+    E('pp-top3').innerHTML = ranked.length ? ranked.map(l => {
+      const pos = l.gain >= 0;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:.8rem">
+        <div><div style="font-weight:600">${l.nom}</div><div class="pea-ticker">${l.ticker}</div></div>
+        <div style="text-align:right"><div class="${pos?'vpos':'vneg'}" style="font-weight:600">${pos?'+':''}${(l.gainPct*100).toFixed(2)}%</div>
+        <div style="font-size:.68rem;color:var(--t3)">${pos?'+':''}${fmtD(l.gain)}</div></div>
+      </div>`;
+    }).join('') : '<div class="empty">Cours en cours de chargement…</div>';
+  }
+
+  if (E('pp-source')) E('pp-source').textContent = `Yahoo Finance · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+}
+
+function renderPpManage() {
+  const gerer = E('pp-gerer');
+  if (!gerer) return;
+  gerer.innerHTML = `
+    <div style="font-size:.75rem;color:var(--t2);margin-bottom:14px;line-height:1.8">
+      Entrez vos positions avec le <strong>ticker Yahoo Finance</strong> pour un suivi en temps réel.<br>
+      <span style="color:var(--t3)">Exemples : MSCI World → <code style="color:var(--accent)">CW8.PA</code> · Airbus → <code style="color:var(--accent)">AIR.PA</code> · Nasdaq → <code style="color:var(--accent)">PANX.PA</code> · S&amp;P500 → <code style="color:var(--accent)">500.PA</code></span>
+    </div>
+    <div id="pp-ligne-list" style="margin-bottom:16px"></div>
+    <hr class="msep">
+    <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--teal);margin-bottom:10px">Ajouter une position</div>
+    <div class="pea-add-row">
+      <div class="fg" style="margin:0"><label>Nom</label><input type="text" id="pp-nom" class="fi" placeholder="MSCI World"></div>
+      <div class="fg" style="margin:0"><label>Ticker Yahoo</label><input type="text" id="pp-ticker" class="fi" placeholder="CW8.PA" style="font-family:monospace;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
+      <div class="fg" style="margin:0"><label>Quantité</label><input type="number" id="pp-qte" class="fi" placeholder="10" min="0.001" step="any"></div>
+      <div class="fg" style="margin:0"><label>PRU (€)</label><input type="number" id="pp-pru" class="fi" placeholder="350.00" step="0.01"></div>
+      <div class="fg" style="margin:0"><label>Type</label><select id="pp-type" class="fi"><option value="etf">ETF</option><option value="action">Action</option></select></div>
+      <div style="align-self:end"><button class="mbtn mbtn-save" onclick="ppAddLigne()">+ Ajouter</button></div>
+    </div>
+  `;
+  _renderPpLigneList();
+}
+
+function _renderPpLigneList() {
+  const list = E('pp-ligne-list');
+  if (!list) return;
+  if (!peaLignes.length) { list.innerHTML = '<div style="color:var(--t3);font-size:.8rem;padding:8px 0">Aucune position. Utilisez le formulaire ci-dessous pour ajouter vos lignes.</div>'; return; }
+  const totAchat = peaLignes.reduce((s, l) => s + l.pru * l.qte, 0);
+  list.innerHTML = `<div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:8px">${peaLignes.length} position(s) · Investissement total : <strong style="color:var(--text)">${fmtD(totAchat)}</strong></div>` +
+    peaLignes.map((l, i) => `
+    <div class="pea-line-row">
+      <span style="flex:1;font-weight:600">${l.nom}</span>
+      <code style="color:var(--accent);font-size:.75rem;width:80px">${l.ticker}</code>
+      <span class="vmut" style="width:60px;text-align:right">${l.qte} u.</span>
+      <span class="vmut" style="width:88px;text-align:right">PRU ${fmtD(l.pru)}</span>
+      <span class="vmut" style="width:90px;text-align:right">${fmtD(l.pru * l.qte)}</span>
+      <span class="pill ${l.type==='etf'?'pill-epargne':'pill-bourse'}" style="width:56px;justify-content:center">${l.type.toUpperCase()}</span>
+      <button class="ico-btn" onclick="ppDelLigne(${i})" style="color:var(--red)" title="Supprimer">✕</button>
+    </div>`).join('');
+}
+
+function ppAddLigne() {
+  const nom = E('pp-nom').value.trim();
+  const ticker = E('pp-ticker').value.trim().toUpperCase();
+  const qte = parseFloat(E('pp-qte').value);
+  const pru = parseFloat(E('pp-pru').value);
+  const type = E('pp-type').value;
+  if (!nom || !ticker || isNaN(qte) || qte <= 0 || isNaN(pru) || pru <= 0) { alert('Remplissez tous les champs (nom, ticker, quantité > 0, PRU > 0).'); return; }
+  peaLignes.push({ id: Date.now().toString(), nom, ticker, qte, pru, type });
+  savePeaLignes();
+  ['pp-nom','pp-ticker','pp-qte','pp-pru'].forEach(id => { if (E(id)) E(id).value = ''; });
+  _renderPpLigneList();
+}
+
+function ppDelLigne(i) {
+  if (!confirm(`Supprimer ${peaLignes[i].nom} ?`)) return;
+  peaLignes.splice(i, 1);
+  savePeaLignes();
+  _renderPpLigneList();
 }
 
 // ─── EXPORT / IMPORT ────────────────────────────────────────────────────────────
