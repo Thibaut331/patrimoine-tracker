@@ -172,6 +172,11 @@ tbody td{padding:10px 10px;vertical-align:middle;}
 .pea-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
 .live-badge{font-size:.62rem;background:var(--tl2);color:var(--teal);border-radius:3px;padding:1px 5px;margin-left:4px;vertical-align:middle;}
 .empty{text-align:center;padding:28px;color:var(--t3);font-size:.83rem;}
+.pea-ticker{font-size:.67rem;color:var(--t3);font-family:monospace;margin-top:1px;}
+.pea-add-row{display:grid;grid-template-columns:1.5fr 1.3fr 0.7fr 0.8fr 85px auto;gap:6px;align-items:end;padding-top:11px;border-top:1px solid var(--border);margin-top:8px;}
+.pea-line-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.8rem;}
+.pea-line-row:last-child{border-bottom:none;}
+.pea-refresh{font-size:.68rem;color:var(--t3);padding:2px 7px;border-radius:99px;background:var(--tl2);}
 </style>
 </head>
 <body>
@@ -400,6 +405,7 @@ tbody td{padding:10px 10px;vertical-align:middle;}
     <div class="mhead">
       <h3>PEA — Suivi temps réel <span class="live-badge">LIVE</span></h3>
       <div style="display:flex;gap:8px;align-items:center">
+        <span id="pea-countdown" class="pea-refresh" style="display:none"></span>
         <button class="mbtn mbtn-cancel" style="font-size:.73rem;padding:5px 10px" onclick="loadPEA()">&#8635; Actualiser</button>
         <button class="mclose" onclick="closePEA()">&#10005;</button>
       </div>
@@ -413,10 +419,12 @@ tbody td{padding:10px 10px;vertical-align:middle;}
     <div class="tabs">
       <button class="tab active" onclick="peaTab('etf',this)">ETF</button>
       <button class="tab" onclick="peaTab('actions',this)">Actions</button>
+      <button class="tab" onclick="peaTab('gerer',this)">⚙ Gérer</button>
     </div>
     <div id="pea-etf"><div class="tbl-wrap"><table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th></tr></thead><tbody id="etf-body"><tr><td colspan="7" class="empty">Chargement...</td></tr></tbody></table></div><div id="etf-total" style="text-align:right;font-size:.8rem;color:var(--t2);margin-top:8px"></div></div>
     <div id="pea-actions" style="display:none"><div class="tbl-wrap"><table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th></tr></thead><tbody id="act-body"><tr><td colspan="7" class="empty">Chargement...</td></tr></tbody></table></div><div id="act-total" style="text-align:right;font-size:.8rem;color:var(--t2);margin-top:8px"></div></div>
-    <div style="font-size:.68rem;color:var(--t3);margin-top:12px;text-align:center">Cours récupérés via Claude AI · Yahoo Finance · Différé 15 min</div>
+    <div id="pea-gerer" style="display:none"></div>
+    <div id="pea-source-note" style="font-size:.68rem;color:var(--t3);margin-top:12px;text-align:center">Cours récupérés via Yahoo Finance · Temps réel</div>
   </div>
 </div>
 
@@ -889,19 +897,133 @@ function openHist(id) {
 }
 function closeHist() { E('ovHist').classList.remove('open'); }
 
+// ─── PEA LIGNES ─────────────────────────────────────────────────────────────────
+const PEA_LS = 'peaLV1';
+let peaLignes = [];
+(function(){ try { peaLignes = JSON.parse(localStorage.getItem(PEA_LS)) || []; } catch(e) { peaLignes = []; } })();
+function savePeaLignes() { localStorage.setItem(PEA_LS, JSON.stringify(peaLignes)); }
+
 // ─── PEA ────────────────────────────────────────────────────────────────────────
-function openPEA() { E('ovPEA').classList.add('open'); loadPEA(); }
-function closePEA() { E('ovPEA').classList.remove('open'); }
+let _peaTimer = null, _peaCd = 0;
+
+function openPEA() {
+  E('ovPEA').classList.add('open');
+  loadPEA();
+  _peaCd = 60;
+  clearInterval(_peaTimer);
+  _peaTimer = setInterval(() => {
+    _peaCd--;
+    const el = E('pea-countdown');
+    if (el) { el.style.display = 'inline'; el.textContent = `↻ ${_peaCd}s`; }
+    if (_peaCd <= 0) { _peaCd = 60; loadPEA(); }
+  }, 1000);
+}
+function closePEA() { E('ovPEA').classList.remove('open'); clearInterval(_peaTimer); }
 
 function peaTab(tab, el) {
   document.querySelectorAll('#ovPEA .tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  E('pea-etf').style.display = tab==='etf'?'block':'none';
-  E('pea-actions').style.display = tab==='actions'?'block':'none';
+  E('pea-etf').style.display = tab==='etf' ? 'block' : 'none';
+  E('pea-actions').style.display = tab==='actions' ? 'block' : 'none';
+  E('pea-gerer').style.display = tab==='gerer' ? 'block' : 'none';
+  if (tab==='gerer') renderPeaManage();
+}
+
+async function fetchYahooPrice(ticker) {
+  const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+  try {
+    const r = await fetch(yUrl, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) {
+      const d = await r.json();
+      const price = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
+      if (price != null) return price;
+    }
+  } catch(e) {}
+  // Fallback via proxy CORS public
+  const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`;
+  const r2 = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
+  const d2 = await r2.json();
+  const price2 = d2?.chart?.result?.[0]?.meta?.regularMarketPrice;
+  if (price2 == null) throw new Error(`Cours introuvable pour ${ticker}`);
+  return price2;
+}
+
+function _buildPeaRows(lignes, bodyId, totalId) {
+  const fmtPea = n => n!=null && !isNaN(n) ? fmtD(n) : '—';
+  const tbody = E(bodyId);
+  if (!lignes.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Aucune ligne. Configurez vos positions dans ⚙ Gérer.</td></tr>';
+    E(totalId).innerHTML = '';
+    return 0;
+  }
+  let html='', totAchat=0, totLive=0, totGain=0;
+  for (const l of lignes) {
+    const loading = l._price == null && !l._err;
+    const prixLive = l._price;
+    const achat = l.pru * l.qte;
+    const somLive = prixLive != null ? prixLive * l.qte : null;
+    const gp = somLive != null ? somLive - achat : null;
+    const evolPct = gp != null && achat > 0 ? gp / achat : null;
+    totAchat += achat;
+    if (somLive != null) { totLive += somLive; totGain += gp; }
+    const pos = gp == null ? true : gp >= 0;
+    html += `<tr>
+      <td><div class="aname" style="font-size:.8rem">${l.nom}</div><div class="pea-ticker">${l.ticker}</div></td>
+      <td class="vmut">${l.qte}</td>
+      <td class="vmut">${fmtPea(l.pru)}</td>
+      <td style="font-weight:600">${loading ? '<span style="color:var(--t3)">…</span>' : l._err ? '<span style="color:var(--red);font-size:.7rem">Err</span>' : fmtPea(prixLive)}</td>
+      <td style="font-weight:600;color:var(--teal)">${somLive!=null ? fmtPea(somLive) : '—'}</td>
+      <td><span class="${pos?'vpos':'vneg'}">${gp!=null ? (pos?'+':'') + fmtD(gp) : '—'}</span></td>
+      <td><span class="${pos?'vpos':'vneg'}" style="font-weight:600">${evolPct!=null ? (pos?'+':'') + (evolPct*100).toFixed(2)+'%' : '—'}</span></td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+  E(totalId).innerHTML = `Achat : <strong style="color:var(--t2);margin:0 10px">${fmtD(totAchat)}</strong> Live : <strong style="color:var(--teal);margin:0 10px">${fmtD(totLive)}</strong> Gain : <strong style="color:${totGain>=0?'var(--green)':'var(--red)'}">${totGain>=0?'+':''}${fmtD(totGain)}</strong>`;
+  return totLive;
 }
 
 async function loadPEA() {
-  ['etf-body','act-body'].forEach(id=>E(id).innerHTML='<tr><td colspan="7" class="empty">Chargement...</td></tr>');
+  _peaCd = 60;
+  if (peaLignes.length > 0) {
+    await _loadPeaYahoo();
+  } else {
+    await _loadPeaSheet();
+  }
+}
+
+async function _loadPeaYahoo() {
+  const etfs = peaLignes.filter(l => l.type === 'etf');
+  const actions = peaLignes.filter(l => l.type === 'action');
+  peaLignes.forEach(l => { l._price = null; l._err = false; });
+  _buildPeaRows(etfs, 'etf-body', 'etf-total');
+  _buildPeaRows(actions, 'act-body', 'act-total');
+  const peaActif = state.actifs.find(a => a.nom.toLowerCase().includes('pea'));
+  const vers = peaActif?.pr ?? peaLignes.reduce((s,l) => s + l.pru * l.qte, 0);
+  E('pea-vers').textContent = fmtD(vers);
+  E('pea-val').textContent = '…'; E('pea-val').style.color = 'var(--teal)';
+  E('pea-gain').textContent = '…'; E('pea-perf').textContent = '…';
+  await Promise.allSettled(peaLignes.map(async l => {
+    try { l._price = await fetchYahooPrice(l.ticker); }
+    catch(e) { l._err = true; console.warn(`[PEA] ${l.ticker}: ${e.message}`); }
+  }));
+  let totLive = 0;
+  totLive += _buildPeaRows(etfs, 'etf-body', 'etf-total');
+  totLive += _buildPeaRows(actions, 'act-body', 'act-total');
+  const totGain = peaLignes.reduce((s,l) => l._price != null ? s + (l._price * l.qte - l.pru * l.qte) : s, 0);
+  if (totLive > 0) {
+    E('pea-val').textContent = fmtD(totLive);
+    E('pea-gain').textContent = (totGain >= 0 ? '+' : '') + fmtD(totGain);
+    E('pea-gain').style.color = totGain >= 0 ? 'var(--green)' : 'var(--red)';
+    const perf = vers > 0 ? totGain / vers : 0;
+    E('pea-perf').textContent = (perf >= 0 ? '+' : '') + (perf * 100).toFixed(2) + '%';
+    E('pea-perf').style.color = perf >= 0 ? 'var(--green)' : 'var(--red)';
+    if (peaActif) { peaActif.val = Math.round(totLive * 100) / 100; save(); renderDashboard(); }
+  }
+  E('pea-source-note').textContent = `Yahoo Finance · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+}
+
+async function _loadPeaSheet() {
+  ['etf-body','act-body'].forEach(id => E(id).innerHTML='<tr><td colspan="7" class="empty">Chargement...</td></tr>');
   const url = sheet => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}`;
   const parse = async sheet => {
     const r = await fetch(url(sheet));
@@ -910,8 +1032,7 @@ async function loadPEA() {
   };
   const cv = (row,i) => row?.c?.[i]?.v ?? null;
   const fmtPea = n => n!=null&&!isNaN(n)?fmtD(n):'—';
-
-  function renderPeaRows(table, bodyId, totalId, startRow) {
+  function renderSheetRows(table, bodyId, totalId, startRow) {
     const tbody = E(bodyId);
     if (!table?.rows?.length) { tbody.innerHTML='<tr><td colspan="7" class="empty">Aucune donnée.</td></tr>'; return; }
     let html='', totAchat=0, totLive=0, totGain=0;
@@ -924,45 +1045,90 @@ async function loadPEA() {
       const evolPct=cv(r,9);
       html+=`<tr>
         <td><div class="aname" style="font-size:.8rem">${nom}</div></td>
-        <td class="vmut">${qte??'—'}</td>
-        <td class="vmut">${fmtPea(pru)}</td>
+        <td class="vmut">${qte??'—'}</td><td class="vmut">${fmtPea(pru)}</td>
         <td style="font-weight:600">${fmtPea(prixLive)}</td>
         <td style="font-weight:600;color:var(--teal)">${fmtPea(somLive)}</td>
         <td><span class="${pos?'vpos':'vneg'}">${gp!=null?s+fmtD(gp):'—'}</span></td>
-        <td><span class="${pos?'vpos':'vneg'}" style="font-weight:600">${evolPct!=null?(pos?'+':'')+( evolPct*100).toFixed(2)+'%':'—'}</span></td>
+        <td><span class="${pos?'vpos':'vneg'}" style="font-weight:600">${evolPct!=null?(pos?'+':'')+(evolPct*100).toFixed(2)+'%':'—'}</span></td>
       </tr>`;
     }
     tbody.innerHTML = html||'<tr><td colspan="7" class="empty">Aucune ligne.</td></tr>';
     E(totalId).innerHTML=`Achat : <strong style="color:var(--t2);margin:0 10px">${fmtD(totAchat)}</strong> Live : <strong style="color:var(--teal);margin:0 10px">${fmtD(totLive)}</strong> Gain : <strong style="color:${totGain>=0?'var(--green)':'var(--red)'}">${totGain>=0?'+':''}${fmtD(totGain)}</strong>`;
   }
-
-  // KPIs depuis graphiques
   try {
     const dash = await parse('graphiques');
     let val=null,vers=null,gain=null,perf=null;
-    dash?.rows?.forEach(r=>{
-      const a=cv(r,7),b=cv(r,8);
-      if(typeof a==='string'){
-        if(a.includes('Valorisation'))val=b;
-        if(a.includes('Apports'))vers=b;
-        if(a.includes('GAIN'))gain=b;
-        if(a.includes('RENDEMENT'))perf=b;
-      }
-    });
-    E('pea-val').textContent=val?fmtD(val):'8 909 €'; E('pea-val').style.color='var(--teal)';
-    E('pea-vers').textContent=vers?fmtD(vers):'7 365 €';
-    E('pea-gain').textContent=gain?fmtD(gain):'1 545 €'; E('pea-gain').style.color='var(--green)';
-    E('pea-perf').textContent=perf?((perf*100).toFixed(3)+'%'):'20,975%'; E('pea-perf').style.color='var(--green)';
-  } catch(e) {
-    E('pea-val').textContent='8 909,21 €'; E('pea-vers').textContent='7 364,51 €';
-    E('pea-gain').textContent='1 544,70 €'; E('pea-perf').textContent='+20,975%';
+    dash?.rows?.forEach(r=>{ const a=cv(r,7),b=cv(r,8); if(typeof a==='string'){if(a.includes('Valorisation'))val=b;if(a.includes('Apports'))vers=b;if(a.includes('GAIN'))gain=b;if(a.includes('RENDEMENT'))perf=b;} });
+    E('pea-val').textContent=val?fmtD(val):'—'; E('pea-val').style.color='var(--teal)';
+    E('pea-vers').textContent=vers?fmtD(vers):'—';
+    E('pea-gain').textContent=gain?fmtD(gain):'—'; E('pea-gain').style.color='var(--green)';
+    E('pea-perf').textContent=perf?((perf*100).toFixed(3)+'%'):'—'; E('pea-perf').style.color='var(--green)';
+  } catch(e) {}
+  try { renderSheetRows(await parse('ETF'),'etf-body','etf-total',5); } catch(e) { E('etf-body').innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--red);padding:14px">Erreur : ${e.message}</td></tr>`; }
+  try { renderSheetRows(await parse('ACTIONS'),'act-body','act-total',5); } catch(e) { E('act-body').innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--red);padding:14px">Erreur : ${e.message}</td></tr>`; }
+  E('pea-source-note').textContent = 'Google Sheets · Yahoo Finance · Différé ~15 min — Ajoutez vos lignes dans ⚙ Gérer pour des cours en direct';
+}
+
+// ─── PEA GÉRER ───────────────────────────────────────────────────────────────────
+function renderPeaManage() {
+  E('pea-gerer').innerHTML = `
+    <div style="font-size:.75rem;color:var(--t2);margin-bottom:10px;line-height:1.6">
+      Ajoutez vos positions avec le ticker <strong>Yahoo Finance</strong> pour des cours en temps réel.<br>
+      <span style="color:var(--t3)">Ex : MSCI World → <code style="color:var(--accent)">CW8.PA</code> · Airbus → <code style="color:var(--accent)">AIR.PA</code> · TotalEnergies → <code style="color:var(--accent)">TTE.PA</code></span>
+    </div>
+    <div id="pea-ligne-list"></div>
+    <div style="padding-top:12px">
+      <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--teal);margin-bottom:8px">Ajouter une ligne</div>
+      <div class="pea-add-row">
+        <div class="fg" style="margin:0"><label>Nom</label><input type="text" id="pl-nom" class="fi" placeholder="MSCI World"></div>
+        <div class="fg" style="margin:0"><label>Ticker Yahoo</label><input type="text" id="pl-ticker" class="fi" placeholder="CW8.PA" style="font-family:monospace;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
+        <div class="fg" style="margin:0"><label>Quantité</label><input type="number" id="pl-qte" class="fi" placeholder="10" min="0" step="any"></div>
+        <div class="fg" style="margin:0"><label>PRU (€)</label><input type="number" id="pl-pru" class="fi" placeholder="350.00" step="0.01"></div>
+        <div class="fg" style="margin:0"><label>Type</label><select id="pl-type" class="fi"><option value="etf">ETF</option><option value="action">Action</option></select></div>
+        <div style="align-self:end"><button class="mbtn mbtn-save" onclick="addPeaLigne()">+ Ajouter</button></div>
+      </div>
+    </div>`;
+  _renderPeaLigneList();
+}
+
+function _renderPeaLigneList() {
+  const list = E('pea-ligne-list');
+  if (!list) return;
+  if (!peaLignes.length) {
+    list.innerHTML = '<div style="color:var(--t3);font-size:.8rem;padding:8px 0 12px">Aucune ligne configurée. Les cours viendront du Google Sheet.</div>';
+    return;
   }
+  list.innerHTML = peaLignes.map((l,i) => `
+    <div class="pea-line-row">
+      <span style="flex:1;font-weight:600">${l.nom}</span>
+      <code style="color:var(--accent);font-size:.75rem;width:80px">${l.ticker}</code>
+      <span class="vmut" style="width:48px;text-align:right">${l.qte} u.</span>
+      <span class="vmut" style="width:80px;text-align:right">PRU ${fmtD(l.pru)}</span>
+      <span class="pill ${l.type==='etf'?'pill-epargne':'pill-bourse'}" style="width:50px;justify-content:center">${l.type.toUpperCase()}</span>
+      <button class="ico-btn" onclick="delPeaLigne(${i})" style="color:var(--red)" title="Supprimer">✕</button>
+    </div>`).join('');
+}
 
-  try { renderPeaRows(await parse('ETF'),'etf-body','etf-total',5); }
-  catch(e) { E('etf-body').innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--red);padding:14px">Erreur : ${e.message}</td></tr>`; }
+function addPeaLigne() {
+  const nom = E('pl-nom').value.trim();
+  const ticker = E('pl-ticker').value.trim().toUpperCase();
+  const qte = parseFloat(E('pl-qte').value);
+  const pru = parseFloat(E('pl-pru').value);
+  const type = E('pl-type').value;
+  if (!nom || !ticker || isNaN(qte) || qte <= 0 || isNaN(pru) || pru <= 0) {
+    alert('Veuillez remplir tous les champs (nom, ticker, quantité > 0, PRU > 0).'); return;
+  }
+  peaLignes.push({ id: Date.now().toString(), nom, ticker, qte, pru, type });
+  savePeaLignes();
+  ['pl-nom','pl-ticker','pl-qte','pl-pru'].forEach(id => E(id).value = '');
+  _renderPeaLigneList();
+}
 
-  try { renderPeaRows(await parse('ACTIONS'),'act-body','act-total',5); }
-  catch(e) { E('act-body').innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--red);padding:14px">Erreur : ${e.message}</td></tr>`; }
+function delPeaLigne(i) {
+  if (!confirm(`Supprimer ${peaLignes[i].nom} ?`)) return;
+  peaLignes.splice(i, 1);
+  savePeaLignes();
+  _renderPeaLigneList();
 }
 
 // ─── EXPORT / IMPORT ────────────────────────────────────────────────────────────
