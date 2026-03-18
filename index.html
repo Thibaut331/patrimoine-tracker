@@ -302,6 +302,12 @@ tbody td{padding:10px 10px;vertical-align:middle;}
       <div class="fi-m"><div class="fi-ml">Gain total</div><div class="fi-mv" id="pp-gain">—</div></div>
       <div class="fi-m"><div class="fi-ml">Performance</div><div class="fi-mv" id="pp-perf">—</div></div>
     </div>
+    <!-- KPIs secondaires : transactions -->
+    <div class="g3" style="margin-bottom:14px">
+      <div class="fi-m"><div class="fi-ml">PV réalisées</div><div class="fi-mv" id="pp-pv-real">—</div></div>
+      <div class="fi-m"><div class="fi-ml">Dividendes perçus</div><div class="fi-mv" id="pp-divs">—</div></div>
+      <div class="fi-m"><div class="fi-ml">Rendement global</div><div class="fi-mv" id="pp-rdt-global" title="(Gain latent + PV réalisées + Dividendes) / Coût total investi">—</div></div>
+    </div>
     <!-- Chart + Top positions -->
     <div class="g2" style="margin-bottom:14px">
       <div class="card"><div class="card-title">Répartition ETF / Actions</div><div style="height:180px"><canvas id="ppPieChart"></canvas></div></div>
@@ -316,16 +322,16 @@ tbody td{padding:10px 10px;vertical-align:middle;}
     <!-- ETF -->
     <div class="card" id="pp-etf">
       <div class="tbl-wrap">
-        <table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th></tr></thead>
-        <tbody id="pp-etf-body"><tr><td colspan="7" class="empty">Chargement…</td></tr></tbody></table>
+        <table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th><th>Divid.</th><th></th></tr></thead>
+        <tbody id="pp-etf-body"><tr><td colspan="9" class="empty">Chargement…</td></tr></tbody></table>
       </div>
       <div id="pp-etf-total" style="text-align:right;font-size:.8rem;color:var(--t2);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"></div>
     </div>
     <!-- Actions -->
     <div class="card" id="pp-actions" style="display:none">
       <div class="tbl-wrap">
-        <table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th></tr></thead>
-        <tbody id="pp-act-body"><tr><td colspan="7" class="empty">Chargement…</td></tr></tbody></table>
+        <table><thead><tr><th>Actif</th><th>Qté</th><th>PRU</th><th>Prix live</th><th>Valeur</th><th>+/- value</th><th>Perf</th><th>Divid.</th><th></th></tr></thead>
+        <tbody id="pp-act-body"><tr><td colspan="9" class="empty">Chargement…</td></tr></tbody></table>
       </div>
       <div id="pp-act-total" style="text-align:right;font-size:.8rem;color:var(--t2);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"></div>
     </div>
@@ -448,6 +454,48 @@ tbody td{padding:10px 10px;vertical-align:middle;}
     <div style="height:120px;margin-bottom:12px"><canvas id="miniChart"></canvas></div>
     <div id="hist-list"></div>
     <div id="hist-loan" style="margin-top:8px;font-size:.72rem;color:var(--t3)"></div>
+  </div>
+</div>
+
+<!-- MODAL TRANSACTION PEA (dividendes + ventes) -->
+<div class="overlay" id="ovPpTx">
+  <div class="modal" style="max-width:520px">
+    <div class="mhead"><h3 id="ppTxTitle">Transactions</h3><button class="mclose" onclick="closePpTx()">&#10005;</button></div>
+    <div class="tabs" style="margin-bottom:14px">
+      <button class="tab active" onclick="ppTxTab('div',this)">&#128178; Dividendes</button>
+      <button class="tab" onclick="ppTxTab('vente',this)">&#128200; Vente de titres</button>
+    </div>
+    <!-- Dividendes -->
+    <div id="ppTx-div">
+      <div id="ppTx-div-list" style="max-height:180px;overflow-y:auto;margin-bottom:10px"></div>
+      <hr class="msep">
+      <div class="msec">Enregistrer un dividende</div>
+      <div class="f2">
+        <div class="fg" style="margin:0"><label>Date</label><input type="date" id="ppTx-div-date" class="fi"></div>
+        <div class="fg" style="margin:0"><label>Montant total net (€)</label><input type="number" id="ppTx-div-montant" class="fi" placeholder="ex: 45.20" step="0.01" min="0.01"></div>
+      </div>
+      <div class="fg"><label>Note (optionnel)</label><input type="text" id="ppTx-div-note" class="fi" placeholder="ex: Dividende Q1 2025"></div>
+    </div>
+    <!-- Ventes -->
+    <div id="ppTx-vente" style="display:none">
+      <div style="font-size:.73rem;color:var(--t2);margin-bottom:10px;line-height:1.7">La PV réalisée est calculée depuis votre <strong>PRU</strong>. La quantité est mise à jour après enregistrement.</div>
+      <div id="ppTx-vente-list" style="max-height:150px;overflow-y:auto;margin-bottom:10px"></div>
+      <hr class="msep">
+      <div class="msec">Enregistrer une vente</div>
+      <div class="f2">
+        <div class="fg" style="margin:0"><label>Date</label><input type="date" id="ppTx-v-date" class="fi"></div>
+        <div class="fg" style="margin:0"><label>Quantité vendue</label><input type="number" id="ppTx-v-qte" class="fi" placeholder="ex: 5" step="any" min="0.001" oninput="ppTxPreview()"></div>
+      </div>
+      <div class="f2">
+        <div class="fg" style="margin:0"><label>Prix de vente unitaire (€)</label><input type="number" id="ppTx-v-prix" class="fi" placeholder="ex: 420.50" step="0.01" min="0" oninput="ppTxPreview()"></div>
+        <div class="fg" style="margin:0"><label>Frais courtage (€)</label><input type="number" id="ppTx-v-frais" class="fi" placeholder="0" step="0.01" min="0" value="0" oninput="ppTxPreview()"></div>
+      </div>
+      <div class="prev-box" id="ppTx-v-prev" style="display:none"></div>
+    </div>
+    <div class="mfoot">
+      <button class="mbtn mbtn-cancel" onclick="closePpTx()">Annuler</button>
+      <button class="mbtn mbtn-save" onclick="savePpTx()">Enregistrer</button>
+    </div>
   </div>
 </div>
 
@@ -1325,11 +1373,11 @@ function _ppBuildRows(lignes, bodyId, totalId) {
   const tbody = E(bodyId);
   if (!tbody) return 0;
   if (!lignes.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Aucune position. Ajoutez-en dans ⚙ Gérer les positions.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">Aucune position. Ajoutez-en dans ⚙ Gérer les positions.</td></tr>';
     if (E(totalId)) E(totalId).innerHTML = '';
     return 0;
   }
-  let html = '', totAchat = 0, totLive = 0, totGain = 0;
+  let html = '', totAchat = 0, totLive = 0, totGain = 0, totDiv = 0;
   for (const l of lignes) {
     const loading = l._price == null && !l._err;
     const prixLive = l._price;
@@ -1337,21 +1385,27 @@ function _ppBuildRows(lignes, bodyId, totalId) {
     const somLive = prixLive != null ? prixLive * l.qte : null;
     const gp = somLive != null ? somLive - achat : null;
     const evolPct = gp != null && achat > 0 ? gp / achat : null;
+    const divs = (l.dividendes || []).reduce((s, d) => s + d.montant, 0);
+    const pvReal = (l.ventes || []).reduce((s, v) => s + v.gain, 0);
     totAchat += achat;
     if (somLive != null) { totLive += somLive; totGain += gp; }
+    totDiv += divs;
     const pos = gp == null ? true : gp >= 0;
+    const hasTx = divs > 0 || (l.ventes || []).length > 0;
     html += `<tr>
-      <td><div class="aname" style="font-size:.8rem">${l.nom}</div><div class="pea-ticker">${l.ticker}</div></td>
-      <td class="vmut">${l.qte}</td>
+      <td><div class="aname" style="font-size:.8rem">${l.nom}${pvReal !== 0 ? `<span style="font-size:.63rem;color:${pvReal>=0?'var(--green)':'var(--red)'};margin-left:4px">${pvReal>=0?'+':''}${fmtD(pvReal)} réalisé</span>` : ''}</div><div class="pea-ticker">${l.ticker}</div></td>
+      <td class="vmut">${l.qte}${(l.ventes||[]).length ? `<div style="font-size:.62rem;color:var(--t3)">${(l.ventes||[]).reduce((s,v)=>s+v.qte,0)} vendus</div>` : ''}</td>
       <td class="vmut">${fmtPea(l.pru)}</td>
       <td style="font-weight:600">${loading ? '<span style="color:var(--t3)">…</span>' : l._err ? '<span style="color:var(--gold);font-size:.68rem" title="Ticker introuvable — vérifiez le format">⚠ N/D</span>' : fmtPea(prixLive)}</td>
       <td style="font-weight:600;color:var(--teal)">${somLive != null ? fmtPea(somLive) : '—'}</td>
       <td><span class="${pos?'vpos':'vneg'}">${gp != null ? (pos?'+':'') + fmtD(gp) : '—'}</span></td>
       <td><span class="${pos?'vpos':'vneg'}" style="font-weight:600">${evolPct != null ? (pos?'+':'') + (evolPct*100).toFixed(2)+'%' : '—'}</span></td>
+      <td><span class="vpos" style="font-size:.75rem">${divs > 0 ? '+'+fmtD(divs) : '<span class="vmut">—</span>'}</span></td>
+      <td><button class="ico-btn${hasTx?' ':' '}" onclick="openPpTx('${l.id}')" title="Dividendes &amp; ventes" style="font-size:.75rem">&#128178;</button></td>
     </tr>`;
   }
   tbody.innerHTML = html;
-  if (E(totalId)) E(totalId).innerHTML = `Achat : <strong style="color:var(--t2);margin:0 10px">${fmtD(totAchat)}</strong> Live : <strong style="color:var(--teal);margin:0 10px">${fmtD(totLive)}</strong> Gain : <strong style="color:${totGain>=0?'var(--green)':'var(--red)'}">${totGain>=0?'+':''}${fmtD(totGain)}</strong>`;
+  if (E(totalId)) E(totalId).innerHTML = `Achat : <strong style="color:var(--t2);margin:0 10px">${fmtD(totAchat)}</strong> Live : <strong style="color:var(--teal);margin:0 10px">${fmtD(totLive)}</strong> Gain latent : <strong style="color:${totGain>=0?'var(--green)':'var(--red)'}">${totGain>=0?'+':''}${fmtD(totGain)}</strong>${totDiv>0?` · Divid. : <strong style="color:var(--green)">+${fmtD(totDiv)}</strong>`:''}`;
   return totLive;
 }
 
@@ -1426,6 +1480,7 @@ async function _loadPpData() {
     E('pp-source').textContent = src;
     E('pp-source').style.color = nbErr ? 'var(--gold)' : 'var(--t3)';
   }
+  _updatePpKpis();
 }
 
 function renderPpManage() {
@@ -1489,6 +1544,169 @@ function ppDelLigne(i) {
   _renderPpLigneList();
 }
 
+// ─── PEA TRANSACTIONS ────────────────────────────────────────────────────────────
+let _ppTxId = null, _ppTxActiveTab = 'div';
+
+function ppTxTab(tab, el) {
+  _ppTxActiveTab = tab;
+  document.querySelectorAll('#ovPpTx .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  E('ppTx-div').style.display    = tab === 'div'    ? 'block' : 'none';
+  E('ppTx-vente').style.display  = tab === 'vente'  ? 'block' : 'none';
+}
+
+function openPpTx(id) {
+  _ppTxId = id;
+  const l = peaLignes.find(x => x.id === id);
+  if (!l) return;
+  E('ppTxTitle').textContent = l.nom + ' — Transactions';
+  _ppTxActiveTab = 'div';
+  document.querySelectorAll('#ovPpTx .tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+  E('ppTx-div').style.display = 'block'; E('ppTx-vente').style.display = 'none';
+  E('ppTx-div-date').value = TODAY; E('ppTx-div-montant').value = ''; E('ppTx-div-note').value = '';
+  E('ppTx-v-date').value = TODAY; E('ppTx-v-qte').value = ''; E('ppTx-v-prix').value = ''; E('ppTx-v-frais').value = '0';
+  E('ppTx-v-prev').style.display = 'none';
+  _renderPpTxLists();
+  E('ovPpTx').classList.add('open');
+}
+
+function closePpTx() { E('ovPpTx').classList.remove('open'); _ppTxId = null; }
+
+function _renderPpTxLists() {
+  const l = peaLignes.find(x => x.id === _ppTxId);
+  if (!l) return;
+
+  // Liste dividendes
+  const divs = l.dividendes || [];
+  const totDiv = divs.reduce((s, d) => s + d.montant, 0);
+  E('ppTx-div-list').innerHTML = divs.length
+    ? `<div style="font-size:.64rem;color:var(--t3);margin-bottom:6px">${divs.length} dividende(s) · Total : <strong style="color:var(--green)">${fmtD(totDiv)}</strong></div>`
+      + [...divs].slice().reverse().map((d, ri) => {
+          const i = divs.length - 1 - ri;
+          return `<div class="hist-item">
+            <span class="hist-date">${d.date}${d.note ? ' · ' + d.note : ''}</span>
+            <span style="display:flex;align-items:center;gap:6px">
+              <strong class="vpos">+${fmtD(d.montant)}</strong>
+              <button class="ico-btn" style="color:var(--red)" onclick="delPpDiv('${l.id}',${i})">✕</button>
+            </span></div>`;
+        }).join('')
+    : '<div style="color:var(--t3);font-size:.8rem;padding:6px 0">Aucun dividende enregistré.</div>';
+
+  // Liste ventes
+  const ventes = l.ventes || [];
+  const totPV = ventes.reduce((s, v) => s + v.gain, 0);
+  const totVendus = ventes.reduce((s, v) => s + v.qte, 0);
+  E('ppTx-vente-list').innerHTML = ventes.length
+    ? `<div style="font-size:.64rem;color:var(--t3);margin-bottom:6px">${ventes.length} vente(s) · ${totVendus} titre(s) vendus · PV réalisée : <strong style="color:${totPV>=0?'var(--green)':'var(--red)'}">${totPV>=0?'+':''}${fmtD(totPV)}</strong></div>`
+      + [...ventes].slice().reverse().map((v, ri) => {
+          const i = ventes.length - 1 - ri;
+          return `<div class="hist-item">
+            <span class="hist-date">${v.date} · ${v.qte} titre(s) à ${fmtD(v.prix)} (PRU ${fmtD(v.pruAtSale)})</span>
+            <span style="display:flex;align-items:center;gap:6px">
+              <strong class="${v.gain>=0?'vpos':'vneg'}">${v.gain>=0?'+':''}${fmtD(v.gain)}</strong>
+              <button class="ico-btn" style="color:var(--red)" onclick="delPpVente('${l.id}',${i})">✕</button>
+            </span></div>`;
+        }).join('')
+    : '<div style="color:var(--t3);font-size:.8rem;padding:6px 0">Aucune vente enregistrée.</div>';
+}
+
+function ppTxPreview() {
+  const l = peaLignes.find(x => x.id === _ppTxId);
+  if (!l) return;
+  const qte = parseFloat(E('ppTx-v-qte').value) || 0;
+  const prix = parseFloat(E('ppTx-v-prix').value) || 0;
+  const frais = parseFloat(E('ppTx-v-frais').value) || 0;
+  const prev = E('ppTx-v-prev');
+  if (!qte || !prix) { prev.style.display = 'none'; return; }
+  const gain = (prix - l.pru) * qte - frais;
+  const gainPct = l.pru > 0 ? (prix - l.pru) / l.pru * 100 : 0;
+  prev.style.display = 'block';
+  prev.innerHTML = `PRU : <strong>${fmtD(l.pru)}</strong> · Prix vente : <strong>${fmtD(prix)}</strong> · ∆/titre : <strong style="color:${prix>=l.pru?'var(--green)':'var(--red)'}">${gainPct>=0?'+':''}${gainPct.toFixed(2)}%</strong><br>
+    <strong>PV réalisée nette : <span style="color:${gain>=0?'var(--green)':'var(--red)'}">${gain>=0?'+':''}${fmtD(gain)}</span></strong>
+    ${qte > l.qte ? '<br><span style="color:var(--red)">⚠ Quantité supérieure à votre position ('+l.qte+' titres)</span>' : qte===l.qte ? '<br><span style="color:var(--t3)">Position entièrement clôturée</span>' : '<br><span style="color:var(--t3)">Il restera '+(l.qte-qte)+' titre(s)</span>'}`;
+}
+
+function savePpTx() {
+  const l = peaLignes.find(x => x.id === _ppTxId);
+  if (!l) return;
+  if (_ppTxActiveTab === 'div') {
+    const date = E('ppTx-div-date').value || TODAY;
+    const montant = parseFloat(E('ppTx-div-montant').value);
+    const note = E('ppTx-div-note').value.trim();
+    if (isNaN(montant) || montant <= 0) { alert('Montant invalide.'); return; }
+    if (!l.dividendes) l.dividendes = [];
+    l.dividendes.push({ id: Date.now().toString(), date, montant, note });
+    l.dividendes.sort((a, b) => a.date.localeCompare(b.date));
+    E('ppTx-div-montant').value = ''; E('ppTx-div-note').value = '';
+  } else {
+    const date = E('ppTx-v-date').value || TODAY;
+    const qte = parseFloat(E('ppTx-v-qte').value);
+    const prix = parseFloat(E('ppTx-v-prix').value);
+    const frais = parseFloat(E('ppTx-v-frais').value) || 0;
+    if (isNaN(qte) || qte <= 0 || isNaN(prix) || prix <= 0) { alert('Quantité et prix de vente requis.'); return; }
+    if (qte > l.qte) { alert(`Impossible de vendre ${qte} titres — position actuelle : ${l.qte} titre(s).`); return; }
+    const gain = (prix - l.pru) * qte - frais;
+    if (!l.ventes) l.ventes = [];
+    l.ventes.push({ id: Date.now().toString(), date, qte, prix, frais, gain, pruAtSale: l.pru });
+    l.ventes.sort((a, b) => a.date.localeCompare(b.date));
+    l.qte = Math.round((l.qte - qte) * 1e8) / 1e8; // floating point safe
+    E('ppTx-v-qte').value = ''; E('ppTx-v-prix').value = ''; E('ppTx-v-frais').value = '0';
+    E('ppTx-v-prev').style.display = 'none';
+  }
+  savePeaLignes();
+  _renderPpTxLists();
+  _ppBuildRows(peaLignes.filter(x => x.type === 'etf'),    'pp-etf-body', 'pp-etf-total');
+  _ppBuildRows(peaLignes.filter(x => x.type === 'action'), 'pp-act-body', 'pp-act-total');
+  _updatePpKpis();
+}
+
+function delPpDiv(ligneId, idx) {
+  const l = peaLignes.find(x => x.id === ligneId);
+  if (!l || !confirm('Supprimer ce dividende ?')) return;
+  l.dividendes.splice(idx, 1);
+  savePeaLignes(); _renderPpTxLists(); _updatePpKpis();
+}
+
+function delPpVente(ligneId, idx) {
+  const l = peaLignes.find(x => x.id === ligneId);
+  if (!l || !confirm('Supprimer cette vente ? La quantité sera restaurée.')) return;
+  l.qte = Math.round((l.qte + l.ventes[idx].qte) * 1e8) / 1e8;
+  l.ventes.splice(idx, 1);
+  savePeaLignes(); _renderPpTxLists();
+  _ppBuildRows(peaLignes.filter(x => x.type === 'etf'),    'pp-etf-body', 'pp-etf-total');
+  _ppBuildRows(peaLignes.filter(x => x.type === 'action'), 'pp-act-body', 'pp-act-total');
+  _updatePpKpis();
+}
+
+// Calcul KPIs globaux transactions
+function _getTotalDividendes() { return peaLignes.reduce((s, l) => s + (l.dividendes||[]).reduce((s2,d)=>s2+d.montant,0), 0); }
+function _getTotalPVRealisee() { return peaLignes.reduce((s, l) => s + (l.ventes||[]).reduce((s2,v)=>s2+v.gain,0), 0); }
+function _getTotalInvested()   {
+  // Coût historique total = coût actuel + coût des parts vendues (au PRU du moment de la vente)
+  return peaLignes.reduce((s, l) => s + l.pru * l.qte + (l.ventes||[]).reduce((s2,v)=>s2+v.pruAtSale*v.qte,0), 0);
+}
+
+function _updatePpKpis() {
+  const pvReal = _getTotalPVRealisee();
+  const divs   = _getTotalDividendes();
+  const invested = _getTotalInvested();
+  const gainLatent = peaLignes.reduce((s,l) => l._price!=null ? s+(l._price-l.pru)*l.qte : s, 0);
+  const rdtGlobal = invested > 0 ? (gainLatent + pvReal + divs) / invested * 100 : 0;
+
+  if (E('pp-pv-real')) {
+    E('pp-pv-real').textContent = (pvReal>=0?'+':'') + fmtD(pvReal);
+    E('pp-pv-real').style.color = pvReal>0?'var(--green)':pvReal<0?'var(--red)':'var(--t2)';
+  }
+  if (E('pp-divs')) {
+    E('pp-divs').textContent = divs>0 ? '+'+fmtD(divs) : fmtD(divs);
+    E('pp-divs').style.color = divs>0 ? 'var(--green)' : 'var(--t2)';
+  }
+  if (E('pp-rdt-global')) {
+    E('pp-rdt-global').textContent = (rdtGlobal>=0?'+':'') + rdtGlobal.toFixed(2)+'%';
+    E('pp-rdt-global').style.color = rdtGlobal>=0?'var(--green)':'var(--red)';
+  }
+}
+
 // ─── EXPORT / IMPORT ────────────────────────────────────────────────────────────
 function exportData() {
   const d=new Date(), b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
@@ -1515,7 +1733,7 @@ function importData(e) {
 }
 
 // ─── OVERLAY CLOSE ──────────────────────────────────────────────────────────────
-['ovModal','ovHist','ovPEA'].forEach(id=>{
+['ovModal','ovHist','ovPEA','ovPpTx'].forEach(id=>{
   E(id).addEventListener('click',e=>{if(e.target===e.currentTarget)E(id).classList.remove('open');});
 });
 
