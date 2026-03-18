@@ -983,51 +983,88 @@ function peaTab(tab, el) {
   if (tab==='gerer') renderPeaManage();
 }
 
-// Twelve Data — source principale (temps réel, clé API dédiée)
-async function _fetchTwelveData(symbol) {
-  const r = await fetch(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${TWELVE_KEY}`, { signal: AbortSignal.timeout(6000) });
-  if (!r.ok) return null;
-  const d = await r.json();
-  if (d.code || !d.price) return null;
-  return parseFloat(d.price);
+// ─── MOTEUR DE PRIX ──────────────────────────────────────────────────────────────
+// Yahoo Finance (.PA etc.) bloque les requêtes browser (pas de CORS).
+// Twelve Data supporte CORS nativement et accepte des requêtes batch.
+// Stratégie : batch Twelve Data → Yahoo via proxy CORS en fallback.
+
+// Conversion ticker Yahoo → format Twelve Data (exchange)
+function _yahooToTwelve(ticker) {
+  const map = { '.PA':'EURONEXT', '.DE':'XETR', '.L':'LSE', '.MI':'XMIL', '.MC':'BME', '.BR':'ENXTBR', '.AS':'ENXTAM', '.LI':'LSI' };
+  for (const [sfx, exch] of Object.entries(map)) {
+    if (ticker.endsWith(sfx)) return { symbol: ticker.slice(0, -sfx.length), exchange: exch };
+  }
+  return { symbol: ticker, exchange: null };
 }
 
-// Yahoo Finance — fallback CORS
-async function fetchYahooPrice(ticker) {
-  const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
-  try {
-    const r = await fetch(yUrl, { signal: AbortSignal.timeout(5000) });
-    if (r.ok) {
-      const d = await r.json();
-      const price = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
-      if (price != null) return price;
-    }
-  } catch(e) {}
-  const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`;
-  const r2 = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
-  const d2 = await r2.json();
-  const price2 = d2?.chart?.result?.[0]?.meta?.regularMarketPrice;
-  if (price2 == null) throw new Error(`Cours introuvable pour ${ticker}`);
-  return price2;
-}
-
-// fetchPrice : Twelve Data en priorité, Yahoo en fallback
-async function fetchPrice(ticker) {
-  // Essai avec le ticker tel quel (ex: CW8.PA)
-  try {
-    const p = await _fetchTwelveData(ticker);
-    if (p != null) return p;
-  } catch(e) {}
-  // Essai format EPA (ex: CW8.PA → CW8:EPA)
-  if (ticker.endsWith('.PA')) {
+// Batch Twelve Data — une seule requête par groupe d'exchange
+async function _fetchTwelveDataBatch(lignes) {
+  if (!lignes.length) return {};
+  const groups = {};
+  lignes.forEach(l => {
+    const { symbol, exchange } = _yahooToTwelve(l.ticker);
+    const key = exchange || '__US__';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({ ticker: l.ticker, symbol });
+  });
+  const results = {};
+  for (const [exKey, items] of Object.entries(groups)) {
+    const syms = items.map(i => i.symbol);
+    let url = `https://api.twelvedata.com/price?symbol=${syms.join(',')}&apikey=${TWELVE_KEY}`;
+    if (exKey !== '__US__') url += `&exchange=${exKey}`;
     try {
-      const sym = ticker.replace('.PA', ':EPA');
-      const p = await _fetchTwelveData(sym);
+      const ctrl = new AbortController(); const tid = setTimeout(() => ctrl.abort(), 9000);
+      const r = await fetch(url, { signal: ctrl.signal }); clearTimeout(tid);
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (syms.length === 1) {
+        if (d.price && !d.code) results[items[0].ticker] = parseFloat(d.price);
+      } else {
+        items.forEach(({ ticker, symbol }) => { if (d[symbol]?.price && !d[symbol]?.code) results[ticker] = parseFloat(d[symbol].price); });
+      }
+    } catch(e) { console.warn('[TwelveData]', exKey, e.message); }
+  }
+  return results;
+}
+
+// Yahoo via proxy CORS — fallback uniquement
+async function _fetchYahooProxy(ticker) {
+  const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+  for (const proxy of [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(yUrl)}`
+  ]) {
+    try {
+      const ctrl = new AbortController(); const tid = setTimeout(() => ctrl.abort(), 10000);
+      const r = await fetch(proxy, { signal: ctrl.signal }); clearTimeout(tid);
+      if (!r.ok) continue;
+      const d = await r.json();
+      const p = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
       if (p != null) return p;
     } catch(e) {}
   }
-  // Fallback Yahoo Finance
-  return fetchYahooPrice(ticker);
+  throw new Error(`Cours introuvable pour ${ticker}`);
+}
+
+// fetchAllPrices : batch Twelve Data + Yahoo fallback pour les manquants
+async function fetchAllPrices(lignes) {
+  const prices = await _fetchTwelveDataBatch(lignes);
+  const missing = lignes.filter(l => prices[l.ticker] == null);
+  if (missing.length) {
+    await Promise.allSettled(missing.map(async l => {
+      try { prices[l.ticker] = await _fetchYahooProxy(l.ticker); }
+      catch(e) { console.warn('[Yahoo fallback]', l.ticker, e.message); }
+    }));
+  }
+  return prices;
+}
+
+// Compatibilité : fonction unitaire conservée pour le modal
+async function fetchYahooPrice(ticker) { return _fetchYahooProxy(ticker); }
+async function fetchPrice(ticker) {
+  const r = await fetchAllPrices([{ ticker }]);
+  if (r[ticker] != null) return r[ticker];
+  throw new Error(`Cours introuvable pour ${ticker}`);
 }
 
 function _buildPeaRows(lignes, bodyId, totalId) {
@@ -1084,10 +1121,9 @@ async function _loadPeaYahoo() {
   E('pea-vers').textContent = fmtD(vers);
   E('pea-val').textContent = '…'; E('pea-val').style.color = 'var(--teal)';
   E('pea-gain').textContent = '…'; E('pea-perf').textContent = '…';
-  await Promise.allSettled(peaLignes.map(async l => {
-    try { l._price = await fetchPrice(l.ticker); }
-    catch(e) { l._err = true; console.warn(`[PEA] ${l.ticker}: ${e.message}`); }
-  }));
+  // Batch fetch via Twelve Data (1 requête par exchange group)
+  const prices = await fetchAllPrices(peaLignes);
+  peaLignes.forEach(l => { if (prices[l.ticker] != null) l._price = prices[l.ticker]; else l._err = true; });
   let totLive = 0;
   totLive += _buildPeaRows(etfs, 'etf-body', 'etf-total');
   totLive += _buildPeaRows(actions, 'act-body', 'act-total');
@@ -1101,7 +1137,7 @@ async function _loadPeaYahoo() {
     E('pea-perf').style.color = perf >= 0 ? 'var(--green)' : 'var(--red)';
     if (peaActif) { peaActif.val = Math.round(totLive * 100) / 100; save(); renderDashboard(); }
   }
-  E('pea-source-note').textContent = `Twelve Data · Yahoo Finance (fallback) · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+  E('pea-source-note').textContent = `Twelve Data · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
 }
 
 async function _loadPeaSheet() {
@@ -1295,10 +1331,9 @@ async function _loadPpData() {
   if (E('pp-gain')) E('pp-gain').textContent = '…';
   if (E('pp-perf')) E('pp-perf').textContent = '…';
 
-  await Promise.allSettled(peaLignes.map(async l => {
-    try { l._price = await fetchPrice(l.ticker); }
-    catch(e) { l._err = true; console.warn(`[PEA] ${l.ticker}: ${e.message}`); }
-  }));
+  // Batch fetch — une seule requête groupée vers Twelve Data
+  const prices = await fetchAllPrices(peaLignes);
+  peaLignes.forEach(l => { if (prices[l.ticker] != null) l._price = prices[l.ticker]; else l._err = true; });
 
   let totLive = 0;
   totLive += _ppBuildRows(etfs, 'pp-etf-body', 'pp-etf-total');
@@ -1339,7 +1374,7 @@ async function _loadPpData() {
     }).join('') : '<div class="empty">Cours en cours de chargement…</div>';
   }
 
-  if (E('pp-source')) E('pp-source').textContent = `Yahoo Finance · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+  if (E('pp-source')) E('pp-source').textContent = `Twelve Data · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
 }
 
 function renderPpManage() {
