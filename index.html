@@ -1001,9 +1001,14 @@ function closeHist() { E('ovHist').classList.remove('open'); }
 
 // ─── PEA LIGNES ─────────────────────────────────────────────────────────────────
 const PEA_LS = 'peaLV1';
+const PEA_VERS_LS = 'peaVersementsV1';
 let peaLignes = [];
+let peaVersements = null; // null = calcul auto depuis PRU×QTE
 (function(){ try { peaLignes = JSON.parse(localStorage.getItem(PEA_LS)) || []; } catch(e) { peaLignes = []; } })();
+(function(){ const v = localStorage.getItem(PEA_VERS_LS); if (v !== null) peaVersements = parseFloat(v) || null; })();
 function savePeaLignes() { localStorage.setItem(PEA_LS, JSON.stringify(peaLignes)); }
+function savePeaVersements() { if (peaVersements !== null) localStorage.setItem(PEA_VERS_LS, String(peaVersements)); else localStorage.removeItem(PEA_VERS_LS); }
+function getVersements() { return peaVersements ?? peaLignes.reduce((s, l) => s + l.pru * l.qte, 0); }
 
 // ─── PEA ────────────────────────────────────────────────────────────────────────
 let _peaTimer = null, _peaCd = 0;
@@ -1067,15 +1072,18 @@ async function _tdBatch(tickers) {
 
 // Tentative 2 : tickers strippés + paramètre exchange
 // Noms d'exchange corrects pour Twelve Data (validés sur leur API)
+// Codes MIC ISO 10383 utilisés par Twelve Data pour les exchanges européens
 const _TD_EXCHANGE = {
-  '.PA': 'PARIS',      // Euronext Paris
-  '.DE': 'XETRA',     // Deutsche Börse XETRA
-  '.L':  'LSE',        // London Stock Exchange
-  '.MI': 'MILAN',     // Borsa Italiana
-  '.MC': 'MADRID',    // Bolsa de Madrid
-  '.BR': 'BRUSSELS',  // Euronext Bruxelles
-  '.AS': 'AMSTERDAM', // Euronext Amsterdam
+  '.PA': 'XPAR',   // Euronext Paris
+  '.DE': 'XETR',   // Deutsche Börse XETRA
+  '.L':  'XLON',   // London Stock Exchange
+  '.MI': 'XMIL',   // Borsa Italiana
+  '.MC': 'XMAD',   // Bolsa de Madrid
+  '.BR': 'XBRU',   // Euronext Bruxelles
+  '.AS': 'XAMS',   // Euronext Amsterdam
 };
+// Suffixes considérés comme "européens" → Yahoo proxy plus fiable pour eux
+const _EU_SUFFIXES = ['.PA', '.DE', '.L', '.MI', '.MC', '.BR', '.AS'];
 async function _tdBatchStripped(tickers) {
   if (!tickers.length) return {};
   const groups = {};
@@ -1104,47 +1112,64 @@ async function _tdBatchStripped(tickers) {
   return out;
 }
 
-// Tentative 3 : Yahoo Finance via proxy CORS public (dernier recours)
-async function _yahooProxy(ticker) {
-  const base = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
-  for (const proxy of [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`,
-    `https://corsproxy.io/?${encodeURIComponent(base)}`
+// Batch Yahoo Finance via proxy CORS — une seule requête pour plusieurs tickers
+// Utilise l'endpoint v7/quote qui supporte plusieurs symboles en une fois.
+async function _yahooProxyBatch(tickers) {
+  if (!tickers.length) return {};
+  const base = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(tickers.join(','))}`;
+  for (const mkProxy of [
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`
   ]) {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 12000);
     try {
-      const r = await fetch(proxy, { signal: ctrl.signal });
+      const r = await fetch(mkProxy(base), { signal: ctrl.signal });
       clearTimeout(tid);
       if (!r.ok) continue;
       const d = await r.json();
-      const p = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
-      if (p != null) return p;
+      const results = d?.quoteResponse?.result;
+      if (!results?.length) continue;
+      const out = {};
+      results.forEach(q => { if (q.symbol && q.regularMarketPrice != null) out[q.symbol] = q.regularMarketPrice; });
+      if (Object.keys(out).length > 0) return out;
     } catch(e) { clearTimeout(tid); }
   }
-  return null;
+  return {};
+}
+
+// Compat legacy (utilisé dans fetchYahooPrice)
+async function _yahooProxy(ticker) {
+  const r = await _yahooProxyBatch([ticker]);
+  return r[ticker] ?? null;
 }
 
 // Point d'entrée principal : renvoie { ticker → price } pour toutes les lignes
+// Stratégie : Twelve Data en priorité (CORS natif) → Yahoo proxy batch → TD avec exchange
 async function fetchAllPrices(lignes) {
   if (!lignes.length) return {};
   const tickers = lignes.map(l => l.ticker);
-  // Tentative 1
-  const prices = await _tdBatch(tickers);
-  let missing = tickers.filter(t => prices[t] == null);
-  // Tentative 2 (tickers avec suffixe non reconnus en batch direct)
-  if (missing.length) {
-    const p2 = await _tdBatchStripped(missing);
-    Object.assign(prices, p2);
-    missing = tickers.filter(t => prices[t] == null);
+  const prices = {};
+
+  // Étape 1 : Twelve Data batch — une seule requête pour tous les tickers
+  const p1 = await _tdBatch(tickers);
+  Object.assign(prices, p1);
+
+  // Étape 2 : tickers manquants → Yahoo Finance proxy (une seule requête batch)
+  const missing1 = tickers.filter(t => prices[t] == null);
+  if (missing1.length) {
+    const yp = await _yahooProxyBatch(missing1);
+    Object.assign(prices, yp);
   }
-  // Tentative 3 (proxy Yahoo, en parallèle pour les restants)
-  if (missing.length) {
-    await Promise.allSettled(missing.map(async t => {
-      const p = await _yahooProxy(t);
-      if (p != null) prices[t] = p;
-    }));
+
+  // Étape 3 : encore manquants → Twelve Data avec exchange explicite
+  const missing2 = tickers.filter(t => prices[t] == null);
+  if (missing2.length) {
+    const p3 = await _tdBatchStripped(missing2);
+    Object.assign(prices, p3);
   }
+
   return prices;
 }
 
@@ -1210,7 +1235,7 @@ async function _loadPeaYahoo() {
   _buildPeaRows(etfs, 'etf-body', 'etf-total');
   _buildPeaRows(actions, 'act-body', 'act-total');
   const peaActif = state.actifs.find(a => a.nom.toLowerCase().includes('pea'));
-  const vers = peaActif?.pr ?? peaLignes.reduce((s,l) => s + l.pru * l.qte, 0);
+  const vers = getVersements();
   E('pea-vers').textContent = fmtD(vers);
   E('pea-val').textContent = '…'; E('pea-val').style.color = 'var(--teal)';
   E('pea-gain').textContent = '…'; E('pea-perf').textContent = '…';
@@ -1424,7 +1449,7 @@ async function _loadPpData() {
   _ppBuildRows(actions, 'pp-act-body', 'pp-act-total');
 
   const peaActif = state.actifs.find(a => a.nom.toLowerCase().includes('pea'));
-  const vers = peaActif?.pr ?? peaLignes.reduce((s, l) => s + l.pru * l.qte, 0);
+  const vers = getVersements();
   if (E('pp-vers')) E('pp-vers').textContent = fmtD(vers);
   if (E('pp-val')) { E('pp-val').textContent = '…'; E('pp-val').style.color = 'var(--teal)'; }
   if (E('pp-gain')) E('pp-gain').textContent = '…';
@@ -1493,6 +1518,14 @@ function renderPpManage() {
     </div>
     <div id="pp-ligne-list" style="margin-bottom:16px"></div>
     <hr class="msep">
+    <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gold);margin-bottom:8px">Versements PEA</div>
+    <div style="font-size:.73rem;color:var(--t3);margin-bottom:8px">Total des dépôts effectués chez votre courtier (laissez vide pour calcul automatique depuis PRU×QTE)</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
+      <input type="number" id="pp-vers-input" class="fi" placeholder="Ex : 5000 (auto si vide)" step="0.01" min="0" value="${peaVersements ?? ''}" style="max-width:200px">
+      <button class="mbtn mbtn-save" onclick="ppSaveVersements()">Enregistrer</button>
+      ${peaVersements !== null ? `<button class="mbtn mbtn-cancel" onclick="ppResetVersements()" style="font-size:.73rem">Réinitialiser (auto)</button>` : ''}
+    </div>
+    <hr class="msep">
     <div style="font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--teal);margin-bottom:10px">Ajouter une position</div>
     <div class="pea-add-row">
       <div class="fg" style="margin:0"><label>Nom</label><input type="text" id="pp-nom" class="fi" placeholder="MSCI World"></div>
@@ -1542,6 +1575,21 @@ function ppDelLigne(i) {
   peaLignes.splice(i, 1);
   savePeaLignes();
   _renderPpLigneList();
+}
+
+function ppSaveVersements() {
+  const v = parseFloat(E('pp-vers-input').value);
+  peaVersements = isNaN(v) || v < 0 ? null : v;
+  savePeaVersements();
+  if (E('pp-vers')) E('pp-vers').textContent = fmtD(getVersements());
+  renderPpManage();
+}
+
+function ppResetVersements() {
+  peaVersements = null;
+  savePeaVersements();
+  if (E('pp-vers')) E('pp-vers').textContent = fmtD(getVersements());
+  renderPpManage();
 }
 
 // ─── PEA TRANSACTIONS ────────────────────────────────────────────────────────────
