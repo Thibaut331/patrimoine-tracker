@@ -708,10 +708,6 @@ function renderActifs() {
   list.forEach(a => {
     const nv = netVal(a);
     const isPEA = a.cat === 'bourse' && a.etab === 'Fortuneo';
-    const pv = a.pr ? nv - a.pr : null;
-    const pvP = a.pr > 0 ? ((nv-a.pr)/a.pr*100) : null;
-    const pvHtml = pv != null ? `<span class="${pv>=0?'vpos':'vneg'}">${pv>=0?'+':''}${fmt(pv)}<br>${pvP>=0?'+':''}${pvP.toFixed(1)}%</span>` : '<span class="vmut">—</span>';
-
     const h = a.history || [];
     let varHtml = '<span class="vmut">—</span>';
     if (h.length >= 2) {
