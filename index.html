@@ -221,6 +221,7 @@ tbody td{padding:10px 10px;vertical-align:middle;}
     <button class="sb-btn" onclick="applyAmort()">&#8635; Échéances du mois</button>
     <button class="sb-btn" onclick="exportData()">&#8595; Exporter</button>
     <label class="sb-btn" style="cursor:pointer">&#8593; Importer<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
+    <button class="sb-btn" id="sb-apikey-btn" onclick="openApiSettings()">&#9881; Clé API Twelve Data</button>
   </div>
 </aside>
 
@@ -525,12 +526,34 @@ tbody td{padding:10px 10px;vertical-align:middle;}
   </div>
 </div>
 
+<!-- MODAL CLÉ API -->
+<div class="overlay" id="ovApiKey">
+  <div class="modal" style="max-width:420px">
+    <div class="mhead"><h3>&#9881; Clé API Twelve Data</h3><button class="mclose" onclick="closeApiSettings()">&#10005;</button></div>
+    <p style="font-size:.8rem;color:var(--t2);margin-bottom:14px;line-height:1.5">
+      Plan gratuit : <strong style="color:var(--text)">800 req/jour</strong>, actions européennes incluses (Euronext, Xetra, LSE…).<br>
+      Obtenez votre clé sur <strong style="color:var(--accent)">twelvedata.com</strong> → Sign up → Dashboard.
+    </p>
+    <div class="fg">
+      <label>Clé API</label>
+      <input type="text" id="apikey-input" class="fi" placeholder="ex: 81975683bf1143fc833b216731d339f2" autocomplete="off" spellcheck="false">
+    </div>
+    <div id="apikey-status" style="font-size:.75rem;margin-top:8px;min-height:18px"></div>
+    <div class="mfoot">
+      <button class="mbtn mbtn-del" id="apikey-reset-btn" onclick="resetApiKey()" style="display:none">Utiliser la clé par défaut</button>
+      <button class="mbtn mbtn-cancel" onclick="closeApiSettings()">Annuler</button>
+      <button class="mbtn mbtn-save" onclick="saveApiKey()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─── CONSTANTES ────────────────────────────────────────────────────────────────
 const SK = 'ptv5';
 const SHEET_ID = '1y84YHL44yMqyeuRw9UxJMRwQ3S7GYsNRbXVHR9IBJAQ';
 const TODAY = new Date().toISOString().slice(0, 10);
-const TWELVE_KEY = '81975683bf1143fc833b216731d339f2';
+const TWELVE_DEFAULT_KEY = '81975683bf1143fc833b216731d339f2';
+function getTwelveKey() { return localStorage.getItem('twelveApiKey') || TWELVE_DEFAULT_KEY; }
 
 // ─── ÉTAT PAR DÉFAUT ────────────────────────────────────────────────────────────
 const DEFAULT = {
@@ -567,6 +590,14 @@ let state;
 })();
 
 function save() { try { localStorage.setItem(SK, JSON.stringify(state)); } catch(e) {} }
+
+// Indiquer visuellement si une clé perso est déjà configurée
+window.addEventListener('DOMContentLoaded', () => {
+  if (localStorage.getItem('twelveApiKey')) {
+    const btn = document.getElementById('sb-apikey-btn');
+    if (btn) btn.style.color = 'var(--green)';
+  }
+});
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────────
 function E(id) { return document.getElementById(id); }
@@ -1046,7 +1077,7 @@ async function _tdFetch(url) {
 // Twelve Data supporte ce format directement pour les marchés européens.
 async function _tdBatch(tickers) {
   if (!tickers.length) return {};
-  const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(tickers.join(','))}&apikey=${TWELVE_KEY}`;
+  const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(tickers.join(','))}&apikey=${getTwelveKey()}`;
   const d = await _tdFetch(url);
   if (!d) return {};
   const out = {};
@@ -1087,7 +1118,7 @@ async function _tdBatchStripped(tickers) {
   const out = {};
   for (const [exch, items] of Object.entries(groups)) {
     const syms = items.map(i => i.symbol).join(',');
-    let url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(syms)}&apikey=${TWELVE_KEY}`;
+    let url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(syms)}&apikey=${getTwelveKey()}`;
     if (exch !== '__US__') url += `&exchange=${encodeURIComponent(exch)}`;
     const d = await _tdFetch(url);
     if (!d) continue;
@@ -1248,10 +1279,10 @@ async function _loadPeaYahoo() {
   if (nbErrPea) {
     let msg, col;
     if (_tdApiError === 'ratelimit') {
-      msg = `Twelve Data · ⚠ Limite journalière atteinte — réessayez demain ou changez de clé API`;
+      msg = `Twelve Data · ⚠ Limite journalière atteinte — changez de clé API (sidebar ⚙)`;
       col = 'var(--gold)';
     } else if (_tdApiError === 'badkey') {
-      msg = `Twelve Data · ⚠ Clé API invalide`;
+      msg = `Twelve Data · ⚠ Clé API invalide — modifiez-la via ⚙ Clé API dans la sidebar`;
       col = 'var(--red)';
     } else if (_tdApiError === 'network' || nbErrPea === peaLignes.length) {
       msg = `⚠ Cours indisponibles — vérifiez votre connexion ou réessayez`;
@@ -1520,10 +1551,10 @@ async function _loadPpData() {
       src = `Twelve Data · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
       col = 'var(--t3)';
     } else if (_tdApiError === 'ratelimit') {
-      src = `Twelve Data · ⚠ Limite journalière atteinte — réessayez demain ou changez de clé API`;
+      src = `Twelve Data · ⚠ Limite journalière atteinte — changez de clé API (sidebar ⚙)`;
       col = 'var(--gold)';
     } else if (_tdApiError === 'badkey') {
-      src = `Twelve Data · ⚠ Clé API invalide`;
+      src = `Twelve Data · ⚠ Clé API invalide — modifiez-la via ⚙ Clé API dans la sidebar`;
       col = 'var(--red)';
     } else if (_tdApiError === 'network' || nbErr === peaLignes.length) {
       src = `⚠ Cours indisponibles — vérifiez votre connexion ou réessayez`;
@@ -1761,6 +1792,48 @@ function _updatePpKpis() {
     E('pp-rdt-global').textContent = (rdtGlobal>=0?'+':'') + rdtGlobal.toFixed(2)+'%';
     E('pp-rdt-global').style.color = rdtGlobal>=0?'var(--green)':'var(--red)';
   }
+}
+
+// ─── CLÉ API TWELVE DATA ────────────────────────────────────────────────────────
+function openApiSettings() {
+  const custom = localStorage.getItem('twelveApiKey');
+  const input = document.getElementById('apikey-input');
+  const status = document.getElementById('apikey-status');
+  const resetBtn = document.getElementById('apikey-reset-btn');
+  input.value = custom || '';
+  input.placeholder = TWELVE_DEFAULT_KEY.slice(0, 8) + '… (clé par défaut)';
+  if (custom) {
+    status.textContent = 'Clé personnalisée active.';
+    status.style.color = 'var(--green)';
+    resetBtn.style.display = '';
+  } else {
+    status.textContent = 'Clé par défaut utilisée (partagée, peut être épuisée).';
+    status.style.color = 'var(--gold)';
+    resetBtn.style.display = 'none';
+  }
+  document.getElementById('ovApiKey').classList.add('open');
+  setTimeout(() => input.focus(), 80);
+}
+function closeApiSettings() {
+  document.getElementById('ovApiKey').classList.remove('open');
+}
+function saveApiKey() {
+  const val = document.getElementById('apikey-input').value.trim();
+  if (!val) { closeApiSettings(); return; }
+  if (val.length < 20) {
+    const s = document.getElementById('apikey-status');
+    s.textContent = '⚠ Clé trop courte — vérifiez la valeur copiée.';
+    s.style.color = 'var(--red)';
+    return;
+  }
+  localStorage.setItem('twelveApiKey', val);
+  closeApiSettings();
+  document.getElementById('sb-apikey-btn').style.color = 'var(--green)';
+}
+function resetApiKey() {
+  localStorage.removeItem('twelveApiKey');
+  closeApiSettings();
+  document.getElementById('sb-apikey-btn').style.color = '';
 }
 
 // ─── EXPORT / IMPORT ────────────────────────────────────────────────────────────
