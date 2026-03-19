@@ -1153,30 +1153,39 @@ async function _yhRapidBatch(tickers) {
   if (!tickers.length) return {};
   const key = getYhRapidKey();
   if (!key) return {};
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), 10000);
-  try {
-    const url = `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/quote?ticker=${encodeURIComponent(tickers.join(','))}&type=STOCKS`;
-    const r = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' }
-    });
-    clearTimeout(tid);
-    if (!r.ok) return {};
-    const d = await r.json();
-    const out = {};
-    // Format objet { body: { "TTE.PA": { regularMarketPrice: ... } } }
-    if (d?.body && typeof d.body === 'object' && !Array.isArray(d.body)) {
-      for (const [sym, q] of Object.entries(d.body)) {
-        if (q?.regularMarketPrice != null) out[sym] = q.regularMarketPrice;
+  // Essaie deux variantes d'URL (l'API est inconsistante dans sa doc)
+  const urls = [
+    `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/quote?ticker=${encodeURIComponent(tickers.join(','))}`,
+    `https://yahoo-finance15.p.rapidapi.com/api/v1/market/quotes?ticker=${encodeURIComponent(tickers.join(','))}`,
+  ];
+  for (const url of urls) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      const r = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' }
+      });
+      clearTimeout(tid);
+      if (!r.ok) { console.warn('[RapidAPI] HTTP', r.status, url); continue; }
+      const d = await r.json();
+      console.log('[RapidAPI] response:', JSON.stringify(d).slice(0, 300));
+      const out = {};
+      // Format objet { body: { "TTE.PA": { regularMarketPrice: ... } } }
+      if (d?.body && typeof d.body === 'object' && !Array.isArray(d.body)) {
+        for (const [sym, q] of Object.entries(d.body)) {
+          if (q?.regularMarketPrice != null) out[sym] = q.regularMarketPrice;
+        }
       }
-    }
-    // Format tableau { body: [ { symbol, regularMarketPrice } ] }
-    if (d?.body && Array.isArray(d.body)) {
-      d.body.forEach(q => { if (q?.symbol && q.regularMarketPrice != null) out[q.symbol] = q.regularMarketPrice; });
-    }
-    return out;
-  } catch(e) { clearTimeout(tid); return {}; }
+      // Format tableau { body: [ { symbol, regularMarketPrice } ] }
+      if (d?.body && Array.isArray(d.body)) {
+        d.body.forEach(q => { if (q?.symbol && q.regularMarketPrice != null) out[q.symbol] = q.regularMarketPrice; });
+      }
+      if (Object.keys(out).length > 0) return out;
+      console.warn('[RapidAPI] réponse vide ou format inattendu:', d);
+    } catch(e) { clearTimeout(tid); console.warn('[RapidAPI] erreur:', e.message); }
+  }
+  return {};
 }
 
 // Batch Yahoo Finance via proxy CORS — une seule requête pour plusieurs tickers
@@ -1213,35 +1222,35 @@ async function _yahooProxy(ticker) {
 }
 
 // Point d'entrée principal : renvoie { ticker → price } pour toutes les lignes
-// Stratégie : RapidAPI YH Finance (1er, CORS natif, EU+US) → Twelve Data batch → TD exchange → Yahoo proxy CORS
+// Stratégie : Yahoo proxy CORS → RapidAPI (si réseau OK) → Twelve Data batch → TD exchange
 async function fetchAllPrices(lignes) {
   if (!lignes.length) return {};
   _tdApiError = null;
   const tickers = lignes.map(l => l.ticker);
   const prices = {};
 
-  // Étape 1 : RapidAPI Yahoo Finance — CORS natif, supporte .PA .DE .L etc.
-  const p1 = await _yhRapidBatch(tickers);
+  // Étape 1 : Yahoo Finance via proxy CORS (robuste derrière proxy d'entreprise)
+  const p1 = await _yahooProxyBatch(tickers);
   Object.assign(prices, p1);
 
-  // Étape 2 : tickers manquants → Twelve Data batch
+  // Étape 2 : tickers manquants → RapidAPI YH Finance (si clé dispo et réseau OK)
   const missing1 = tickers.filter(t => prices[t] == null);
   if (missing1.length) {
-    const p2 = await _tdBatch(missing1);
+    const p2 = await _yhRapidBatch(missing1);
     Object.assign(prices, p2);
   }
 
-  // Étape 3 : encore manquants → Twelve Data avec exchange explicite
+  // Étape 3 : encore manquants → Twelve Data batch
   const missing2 = tickers.filter(t => prices[t] == null);
   if (missing2.length) {
-    const p3 = await _tdBatchStripped(missing2);
+    const p3 = await _tdBatch(missing2);
     Object.assign(prices, p3);
   }
 
-  // Étape 4 : dernier recours → Yahoo Finance via proxy CORS
+  // Étape 4 : encore manquants → Twelve Data avec exchange explicite
   const missing3 = tickers.filter(t => prices[t] == null);
   if (missing3.length) {
-    const p4 = await _yahooProxyBatch(missing3);
+    const p4 = await _tdBatchStripped(missing3);
     Object.assign(prices, p4);
   }
 
@@ -1350,7 +1359,7 @@ async function _loadPeaYahoo() {
     E('pea-source-note').textContent = msg;
     E('pea-source-note').style.color = col;
   } else {
-    E('pea-source-note').textContent = `Yahoo Finance (RapidAPI) · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+    E('pea-source-note').textContent = `Yahoo Finance · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
     E('pea-source-note').style.color = '';
   }
 }
@@ -1603,7 +1612,7 @@ async function _loadPpData() {
   if (E('pp-source')) {
     let src, col;
     if (!nbErr) {
-      src = `Yahoo Finance (RapidAPI) · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+      src = `Yahoo Finance · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
       col = 'var(--t3)';
     } else if (_tdApiError === 'ratelimit') {
       src = `Twelve Data · ⚠ Limite journalière atteinte — changez de clé API (sidebar ⚙)`;
@@ -1616,7 +1625,7 @@ async function _loadPpData() {
       col = 'var(--gold)';
     } else {
       const errTickers = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
-      src = `Yahoo Finance (RapidAPI) · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers}`;
+      src = `Yahoo Finance · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers}`;
       col = 'var(--gold)';
     }
     E('pp-source').textContent = src;
