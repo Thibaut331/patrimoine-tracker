@@ -1238,7 +1238,15 @@ async function _loadPeaYahoo() {
     E('pea-perf').style.color = perf >= 0 ? 'var(--green)' : 'var(--red)';
     if (peaActif) { peaActif.val = Math.round(totLive * 100) / 100; save(); renderDashboard(); }
   }
-  E('pea-source-note').textContent = `Twelve Data · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+  const nbErrPea = peaLignes.filter(l => l._err).length;
+  if (nbErrPea) {
+    const errT = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
+    E('pea-source-note').textContent = `Twelve Data · ⚠ Introuvable : ${errT} (format attendu : CW8.PA)`;
+    E('pea-source-note').style.color = 'var(--gold)';
+  } else {
+    E('pea-source-note').textContent = `Twelve Data · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+    E('pea-source-note').style.color = '';
+  }
 }
 
 async function _loadPeaSheet() {
@@ -1487,7 +1495,8 @@ async function _loadPpData() {
   const nbOk = peaLignes.filter(l => l._price != null).length;
   const nbErr = peaLignes.filter(l => l._err).length;
   if (E('pp-source')) {
-    const src = nbErr ? `Twelve Data · ${nbOk}/${peaLignes.length} cours · ⚠ ${nbErr} ticker(s) en erreur — vérifiez le format (ex: CW8.PA)` : `Twelve Data · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+    const errTickers = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
+    const src = nbErr ? `Twelve Data · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers} (format attendu : CW8.PA)` : `Twelve Data · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
     E('pp-source').textContent = src;
     E('pp-source').style.color = nbErr ? 'var(--gold)' : 'var(--t3)';
   }
