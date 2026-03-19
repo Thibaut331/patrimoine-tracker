@@ -1025,19 +1025,21 @@ function peaTab(tab, el) {
 // 3 tentatives par ticker : TD direct → TD stripped+exchange → proxy Yahoo (dernier recours)
 
 // Fetch JSON avec timeout via AbortController (compatible tous navigateurs modernes)
-let _tdApiError = null; // 'ratelimit' | 'badkey' | null
+let _tdApiError = null; // 'ratelimit' | 'badkey' | 'network' | null
 async function _tdFetch(url) {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 9000);
   try {
     const r = await fetch(url, { signal: ctrl.signal });
     clearTimeout(tid);
+    if (r.status === 429) { _tdApiError = 'ratelimit'; return null; }
+    if (r.status === 401 || r.status === 403) { _tdApiError = 'badkey'; return null; }
     if (!r.ok) return null;
     const d = await r.json();
     if (d && d.code === 429) { _tdApiError = 'ratelimit'; return null; }
     if (d && d.code === 401) { _tdApiError = 'badkey'; return null; }
     return d;
-  } catch(e) { clearTimeout(tid); return null; }
+  } catch(e) { clearTimeout(tid); _tdApiError = _tdApiError || 'network'; return null; }
 }
 
 // Tentative 1 : batch avec tickers Yahoo tels quels (ex: CW8.PA, AIR.PA)
@@ -1246,11 +1248,14 @@ async function _loadPeaYahoo() {
   if (nbErrPea) {
     let msg, col;
     if (_tdApiError === 'ratelimit') {
-      msg = `Twelve Data · ⚠ Limite journalière atteinte (8 req/jour en free tier) — réessayez demain`;
+      msg = `Twelve Data · ⚠ Limite journalière atteinte — réessayez demain ou changez de clé API`;
       col = 'var(--gold)';
     } else if (_tdApiError === 'badkey') {
       msg = `Twelve Data · ⚠ Clé API invalide`;
       col = 'var(--red)';
+    } else if (_tdApiError === 'network' || nbErrPea === peaLignes.length) {
+      msg = `⚠ Cours indisponibles — vérifiez votre connexion ou réessayez`;
+      col = 'var(--gold)';
     } else {
       const errT = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
       msg = `Twelve Data · ⚠ Introuvable : ${errT} (format attendu : CW8.PA)`;
@@ -1515,11 +1520,14 @@ async function _loadPpData() {
       src = `Twelve Data · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
       col = 'var(--t3)';
     } else if (_tdApiError === 'ratelimit') {
-      src = `Twelve Data · ⚠ Limite journalière atteinte (8 req/jour en free tier) — réessayez demain`;
+      src = `Twelve Data · ⚠ Limite journalière atteinte — réessayez demain ou changez de clé API`;
       col = 'var(--gold)';
     } else if (_tdApiError === 'badkey') {
       src = `Twelve Data · ⚠ Clé API invalide`;
       col = 'var(--red)';
+    } else if (_tdApiError === 'network' || nbErr === peaLignes.length) {
+      src = `⚠ Cours indisponibles — vérifiez votre connexion ou réessayez`;
+      col = 'var(--gold)';
     } else {
       const errTickers = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
       src = `Twelve Data · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers} (format attendu : CW8.PA)`;
