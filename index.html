@@ -1025,6 +1025,7 @@ function peaTab(tab, el) {
 // 3 tentatives par ticker : TD direct → TD stripped+exchange → proxy Yahoo (dernier recours)
 
 // Fetch JSON avec timeout via AbortController (compatible tous navigateurs modernes)
+let _tdApiError = null; // 'ratelimit' | 'badkey' | null
 async function _tdFetch(url) {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 9000);
@@ -1033,6 +1034,8 @@ async function _tdFetch(url) {
     clearTimeout(tid);
     if (!r.ok) return null;
     const d = await r.json();
+    if (d && d.code === 429) { _tdApiError = 'ratelimit'; return null; }
+    if (d && d.code === 401) { _tdApiError = 'badkey'; return null; }
     return d;
   } catch(e) { clearTimeout(tid); return null; }
 }
@@ -1132,6 +1135,7 @@ async function _yahooProxy(ticker) {
 // Stratégie : Twelve Data en priorité (CORS natif) → Yahoo proxy batch → TD avec exchange
 async function fetchAllPrices(lignes) {
   if (!lignes.length) return {};
+  _tdApiError = null;
   const tickers = lignes.map(l => l.ticker);
   const prices = {};
 
@@ -1240,9 +1244,20 @@ async function _loadPeaYahoo() {
   }
   const nbErrPea = peaLignes.filter(l => l._err).length;
   if (nbErrPea) {
-    const errT = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
-    E('pea-source-note').textContent = `Twelve Data · ⚠ Introuvable : ${errT} (format attendu : CW8.PA)`;
-    E('pea-source-note').style.color = 'var(--gold)';
+    let msg, col;
+    if (_tdApiError === 'ratelimit') {
+      msg = `Twelve Data · ⚠ Limite journalière atteinte (8 req/jour en free tier) — réessayez demain`;
+      col = 'var(--gold)';
+    } else if (_tdApiError === 'badkey') {
+      msg = `Twelve Data · ⚠ Clé API invalide`;
+      col = 'var(--red)';
+    } else {
+      const errT = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
+      msg = `Twelve Data · ⚠ Introuvable : ${errT} (format attendu : CW8.PA)`;
+      col = 'var(--gold)';
+    }
+    E('pea-source-note').textContent = msg;
+    E('pea-source-note').style.color = col;
   } else {
     E('pea-source-note').textContent = `Twelve Data · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
     E('pea-source-note').style.color = '';
@@ -1495,10 +1510,23 @@ async function _loadPpData() {
   const nbOk = peaLignes.filter(l => l._price != null).length;
   const nbErr = peaLignes.filter(l => l._err).length;
   if (E('pp-source')) {
-    const errTickers = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
-    const src = nbErr ? `Twelve Data · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers} (format attendu : CW8.PA)` : `Twelve Data · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+    let src, col;
+    if (!nbErr) {
+      src = `Twelve Data · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+      col = 'var(--t3)';
+    } else if (_tdApiError === 'ratelimit') {
+      src = `Twelve Data · ⚠ Limite journalière atteinte (8 req/jour en free tier) — réessayez demain`;
+      col = 'var(--gold)';
+    } else if (_tdApiError === 'badkey') {
+      src = `Twelve Data · ⚠ Clé API invalide`;
+      col = 'var(--red)';
+    } else {
+      const errTickers = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
+      src = `Twelve Data · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers} (format attendu : CW8.PA)`;
+      col = 'var(--gold)';
+    }
     E('pp-source').textContent = src;
-    E('pp-source').style.color = nbErr ? 'var(--gold)' : 'var(--t3)';
+    E('pp-source').style.color = col;
   }
   _updatePpKpis();
 }
