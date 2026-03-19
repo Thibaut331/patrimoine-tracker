@@ -1067,15 +1067,18 @@ async function _tdBatch(tickers) {
 
 // Tentative 2 : tickers strippés + paramètre exchange
 // Noms d'exchange corrects pour Twelve Data (validés sur leur API)
+// Codes MIC ISO 10383 utilisés par Twelve Data pour les exchanges européens
 const _TD_EXCHANGE = {
-  '.PA': 'PARIS',      // Euronext Paris
-  '.DE': 'XETRA',     // Deutsche Börse XETRA
-  '.L':  'LSE',        // London Stock Exchange
-  '.MI': 'MILAN',     // Borsa Italiana
-  '.MC': 'MADRID',    // Bolsa de Madrid
-  '.BR': 'BRUSSELS',  // Euronext Bruxelles
-  '.AS': 'AMSTERDAM', // Euronext Amsterdam
+  '.PA': 'XPAR',   // Euronext Paris
+  '.DE': 'XETR',   // Deutsche Börse XETRA
+  '.L':  'XLON',   // London Stock Exchange
+  '.MI': 'XMIL',   // Borsa Italiana
+  '.MC': 'XMAD',   // Bolsa de Madrid
+  '.BR': 'XBRU',   // Euronext Bruxelles
+  '.AS': 'XAMS',   // Euronext Amsterdam
 };
+// Suffixes considérés comme "européens" → Yahoo proxy plus fiable pour eux
+const _EU_SUFFIXES = ['.PA', '.DE', '.L', '.MI', '.MC', '.BR', '.AS'];
 async function _tdBatchStripped(tickers) {
   if (!tickers.length) return {};
   const groups = {};
@@ -1126,25 +1129,37 @@ async function _yahooProxy(ticker) {
 }
 
 // Point d'entrée principal : renvoie { ticker → price } pour toutes les lignes
+// Stratégie : Yahoo proxy en priorité pour les tickers européens (.PA, .DE…),
+// Twelve Data pour les autres. Fallback croisé dans les deux sens.
 async function fetchAllPrices(lignes) {
   if (!lignes.length) return {};
   const tickers = lignes.map(l => l.ticker);
-  // Tentative 1
-  const prices = await _tdBatch(tickers);
-  let missing = tickers.filter(t => prices[t] == null);
-  // Tentative 2 (tickers avec suffixe non reconnus en batch direct)
-  if (missing.length) {
-    const p2 = await _tdBatchStripped(missing);
-    Object.assign(prices, p2);
-    missing = tickers.filter(t => prices[t] == null);
-  }
-  // Tentative 3 (proxy Yahoo, en parallèle pour les restants)
-  if (missing.length) {
-    await Promise.allSettled(missing.map(async t => {
+  const prices = {};
+
+  // Séparer européens (format Yahoo .PA/.DE…) et US/autres
+  const euTickers    = tickers.filter(t => _EU_SUFFIXES.some(s => t.endsWith(s)));
+  const otherTickers = tickers.filter(t => !_EU_SUFFIXES.some(s => t.endsWith(s)));
+
+  // Étape 1 : tickers européens → Yahoo Finance via proxy CORS (format .PA natif)
+  if (euTickers.length) {
+    await Promise.allSettled(euTickers.map(async t => {
       const p = await _yahooProxy(t);
       if (p != null) prices[t] = p;
     }));
   }
+
+  // Étape 2 : tickers non-européens + tickers EU échoués → Twelve Data
+  const needTd = otherTickers.concat(euTickers.filter(t => prices[t] == null));
+  if (needTd.length) {
+    const p1 = await _tdBatch(needTd);
+    Object.assign(prices, p1);
+    const missing2 = needTd.filter(t => prices[t] == null);
+    if (missing2.length) {
+      const p2 = await _tdBatchStripped(missing2);
+      Object.assign(prices, p2);
+    }
+  }
+
   return prices;
 }
 
@@ -1210,7 +1225,7 @@ async function _loadPeaYahoo() {
   _buildPeaRows(etfs, 'etf-body', 'etf-total');
   _buildPeaRows(actions, 'act-body', 'act-total');
   const peaActif = state.actifs.find(a => a.nom.toLowerCase().includes('pea'));
-  const vers = peaActif?.pr ?? peaLignes.reduce((s,l) => s + l.pru * l.qte, 0);
+  const vers = peaLignes.reduce((s,l) => s + l.pru * l.qte, 0);
   E('pea-vers').textContent = fmtD(vers);
   E('pea-val').textContent = '…'; E('pea-val').style.color = 'var(--teal)';
   E('pea-gain').textContent = '…'; E('pea-perf').textContent = '…';
@@ -1424,7 +1439,7 @@ async function _loadPpData() {
   _ppBuildRows(actions, 'pp-act-body', 'pp-act-total');
 
   const peaActif = state.actifs.find(a => a.nom.toLowerCase().includes('pea'));
-  const vers = peaActif?.pr ?? peaLignes.reduce((s, l) => s + l.pru * l.qte, 0);
+  const vers = peaLignes.reduce((s, l) => s + l.pru * l.qte, 0);
   if (E('pp-vers')) E('pp-vers').textContent = fmtD(vers);
   if (E('pp-val')) { E('pp-val').textContent = '…'; E('pp-val').style.color = 'var(--teal)'; }
   if (E('pp-gain')) E('pp-gain').textContent = '…';
