@@ -528,19 +528,39 @@ tbody td{padding:10px 10px;vertical-align:middle;}
 
 <!-- MODAL CLÉ API -->
 <div class="overlay" id="ovApiKey">
-  <div class="modal" style="max-width:420px">
-    <div class="mhead"><h3>&#9881; Clé API Twelve Data</h3><button class="mclose" onclick="closeApiSettings()">&#10005;</button></div>
-    <p style="font-size:.8rem;color:var(--t2);margin-bottom:14px;line-height:1.5">
-      Plan gratuit : <strong style="color:var(--text)">800 req/jour</strong>, actions européennes incluses (Euronext, Xetra, LSE…).<br>
-      Obtenez votre clé sur <strong style="color:var(--accent)">twelvedata.com</strong> → Sign up → Dashboard.
-    </p>
-    <div class="fg">
-      <label>Clé API</label>
-      <input type="text" id="apikey-input" class="fi" placeholder="ex: 81975683bf1143fc833b216731d339f2" autocomplete="off" spellcheck="false">
+  <div class="modal" style="max-width:460px">
+    <div class="mhead"><h3>&#9881; Sources de données — Clés API</h3><button class="mclose" onclick="closeApiSettings()">&#10005;</button></div>
+
+    <!-- RapidAPI YH Finance (prioritaire) -->
+    <div style="background:var(--s2);border-radius:var(--rad3);padding:12px;margin-bottom:14px">
+      <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;color:var(--text)">1&#xfe0f;&#x20e3; RapidAPI · YH Finance <span style="font-size:.68rem;font-weight:400;color:var(--green)">(prioritaire)</span></div>
+      <p style="font-size:.75rem;color:var(--t2);margin-bottom:10px;line-height:1.5">
+        Cours temps réel, actions EU + US, CORS natif.<br>
+        Clé sur <strong style="color:var(--accent)">rapidapi.com</strong> → YH Finance → Subscribe.
+      </p>
+      <div class="fg" style="margin-bottom:0">
+        <label>Clé RapidAPI</label>
+        <input type="text" id="rapid-input" class="fi" autocomplete="off" spellcheck="false" placeholder="ex: c611686decmsh86e4e47f…">
+      </div>
+      <div id="rapid-status" style="font-size:.72rem;margin-top:6px;min-height:16px"></div>
     </div>
-    <div id="apikey-status" style="font-size:.75rem;margin-top:8px;min-height:18px"></div>
+
+    <!-- Twelve Data (fallback) -->
+    <div style="background:var(--s2);border-radius:var(--rad3);padding:12px;margin-bottom:14px">
+      <div style="font-size:.78rem;font-weight:600;margin-bottom:6px;color:var(--text)">2&#xfe0f;&#x20e3; Twelve Data <span style="font-size:.68rem;font-weight:400;color:var(--t2)">(fallback)</span></div>
+      <p style="font-size:.75rem;color:var(--t2);margin-bottom:10px;line-height:1.5">
+        Plan gratuit : <strong style="color:var(--text)">800 req/jour</strong>, Euronext, Xetra, LSE…<br>
+        Clé sur <strong style="color:var(--accent)">twelvedata.com</strong> → Sign up → Dashboard.
+      </p>
+      <div class="fg" style="margin-bottom:0">
+        <label>Clé Twelve Data</label>
+        <input type="text" id="apikey-input" class="fi" autocomplete="off" spellcheck="false" placeholder="ex: 81975683bf1143fc833b216731d339f2">
+      </div>
+      <div id="apikey-status" style="font-size:.72rem;margin-top:6px;min-height:16px"></div>
+    </div>
+
     <div class="mfoot">
-      <button class="mbtn mbtn-del" id="apikey-reset-btn" onclick="resetApiKey()" style="display:none">Utiliser la clé par défaut</button>
+      <button class="mbtn mbtn-del" id="apikey-reset-btn" onclick="resetApiKey()" style="display:none">Réinitialiser</button>
       <button class="mbtn mbtn-cancel" onclick="closeApiSettings()">Annuler</button>
       <button class="mbtn mbtn-save" onclick="saveApiKey()">Enregistrer</button>
     </div>
@@ -554,6 +574,8 @@ const SHEET_ID = '1y84YHL44yMqyeuRw9UxJMRwQ3S7GYsNRbXVHR9IBJAQ';
 const TODAY = new Date().toISOString().slice(0, 10);
 const TWELVE_DEFAULT_KEY = '81975683bf1143fc833b216731d339f2';
 function getTwelveKey() { return localStorage.getItem('twelveApiKey') || TWELVE_DEFAULT_KEY; }
+const YH_RAPID_DEFAULT_KEY = 'c611686decmsh86e4e47f181d17cp12531ajsn8074b39dfabb';
+function getYhRapidKey() { return localStorage.getItem('yhRapidKey') || YH_RAPID_DEFAULT_KEY; }
 
 // ─── ÉTAT PAR DÉFAUT ────────────────────────────────────────────────────────────
 const DEFAULT = {
@@ -592,12 +614,7 @@ let state;
 function save() { try { localStorage.setItem(SK, JSON.stringify(state)); } catch(e) {} }
 
 // Indiquer visuellement si une clé perso est déjà configurée
-window.addEventListener('DOMContentLoaded', () => {
-  if (localStorage.getItem('twelveApiKey')) {
-    const btn = document.getElementById('sb-apikey-btn');
-    if (btn) btn.style.color = 'var(--green)';
-  }
-});
+window.addEventListener('DOMContentLoaded', () => { _updateSbApiBtn(); });
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────────
 function E(id) { return document.getElementById(id); }
@@ -1131,6 +1148,37 @@ async function _tdBatchStripped(tickers) {
   return out;
 }
 
+// Batch Yahoo Finance via RapidAPI — CORS natif, supporte .PA .DE .L etc.
+async function _yhRapidBatch(tickers) {
+  if (!tickers.length) return {};
+  const key = getYhRapidKey();
+  if (!key) return {};
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const url = `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/quote?ticker=${encodeURIComponent(tickers.join(','))}&type=STOCKS`;
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' }
+    });
+    clearTimeout(tid);
+    if (!r.ok) return {};
+    const d = await r.json();
+    const out = {};
+    // Format objet { body: { "TTE.PA": { regularMarketPrice: ... } } }
+    if (d?.body && typeof d.body === 'object' && !Array.isArray(d.body)) {
+      for (const [sym, q] of Object.entries(d.body)) {
+        if (q?.regularMarketPrice != null) out[sym] = q.regularMarketPrice;
+      }
+    }
+    // Format tableau { body: [ { symbol, regularMarketPrice } ] }
+    if (d?.body && Array.isArray(d.body)) {
+      d.body.forEach(q => { if (q?.symbol && q.regularMarketPrice != null) out[q.symbol] = q.regularMarketPrice; });
+    }
+    return out;
+  } catch(e) { clearTimeout(tid); return {}; }
+}
+
 // Batch Yahoo Finance via proxy CORS — une seule requête pour plusieurs tickers
 // Utilise l'endpoint v7/quote qui supporte plusieurs symboles en une fois.
 async function _yahooProxyBatch(tickers) {
@@ -1165,22 +1213,22 @@ async function _yahooProxy(ticker) {
 }
 
 // Point d'entrée principal : renvoie { ticker → price } pour toutes les lignes
-// Stratégie : Twelve Data en priorité (CORS natif) → Yahoo proxy batch → TD avec exchange
+// Stratégie : RapidAPI YH Finance (1er, CORS natif, EU+US) → Twelve Data batch → TD exchange → Yahoo proxy CORS
 async function fetchAllPrices(lignes) {
   if (!lignes.length) return {};
   _tdApiError = null;
   const tickers = lignes.map(l => l.ticker);
   const prices = {};
 
-  // Étape 1 : Twelve Data batch — une seule requête pour tous les tickers
-  const p1 = await _tdBatch(tickers);
+  // Étape 1 : RapidAPI Yahoo Finance — CORS natif, supporte .PA .DE .L etc.
+  const p1 = await _yhRapidBatch(tickers);
   Object.assign(prices, p1);
 
-  // Étape 2 : tickers manquants → Yahoo Finance proxy (une seule requête batch)
+  // Étape 2 : tickers manquants → Twelve Data batch
   const missing1 = tickers.filter(t => prices[t] == null);
   if (missing1.length) {
-    const yp = await _yahooProxyBatch(missing1);
-    Object.assign(prices, yp);
+    const p2 = await _tdBatch(missing1);
+    Object.assign(prices, p2);
   }
 
   // Étape 3 : encore manquants → Twelve Data avec exchange explicite
@@ -1188,6 +1236,13 @@ async function fetchAllPrices(lignes) {
   if (missing2.length) {
     const p3 = await _tdBatchStripped(missing2);
     Object.assign(prices, p3);
+  }
+
+  // Étape 4 : dernier recours → Yahoo Finance via proxy CORS
+  const missing3 = tickers.filter(t => prices[t] == null);
+  if (missing3.length) {
+    const p4 = await _yahooProxyBatch(missing3);
+    Object.assign(prices, p4);
   }
 
   return prices;
@@ -1295,7 +1350,7 @@ async function _loadPeaYahoo() {
     E('pea-source-note').textContent = msg;
     E('pea-source-note').style.color = col;
   } else {
-    E('pea-source-note').textContent = `Twelve Data · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+    E('pea-source-note').textContent = `Yahoo Finance (RapidAPI) · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
     E('pea-source-note').style.color = '';
   }
 }
@@ -1548,20 +1603,20 @@ async function _loadPpData() {
   if (E('pp-source')) {
     let src, col;
     if (!nbErr) {
-      src = `Twelve Data · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
+      src = `Yahoo Finance (RapidAPI) · ${nbOk} cours · Mis à jour ${new Date().toLocaleTimeString('fr-FR')}`;
       col = 'var(--t3)';
     } else if (_tdApiError === 'ratelimit') {
       src = `Twelve Data · ⚠ Limite journalière atteinte — changez de clé API (sidebar ⚙)`;
       col = 'var(--gold)';
     } else if (_tdApiError === 'badkey') {
-      src = `Twelve Data · ⚠ Clé API invalide — modifiez-la via ⚙ Clé API dans la sidebar`;
+      src = `Twelve Data · ⚠ Clé API invalide — modifiez-la via ⚙ Clé API (sidebar ⚙)`;
       col = 'var(--red)';
     } else if (_tdApiError === 'network' || nbErr === peaLignes.length) {
       src = `⚠ Cours indisponibles — vérifiez votre connexion ou réessayez`;
       col = 'var(--gold)';
     } else {
       const errTickers = peaLignes.filter(l => l._err).map(l => l.ticker).join(', ');
-      src = `Twelve Data · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers} (format attendu : CW8.PA)`;
+      src = `Yahoo Finance (RapidAPI) · ${nbOk}/${peaLignes.length} cours · ⚠ Introuvable : ${errTickers}`;
       col = 'var(--gold)';
     }
     E('pp-source').textContent = src;
@@ -1794,46 +1849,65 @@ function _updatePpKpis() {
   }
 }
 
-// ─── CLÉ API TWELVE DATA ────────────────────────────────────────────────────────
+// ─── CLÉS API (RapidAPI + Twelve Data) ─────────────────────────────────────────
+function _setFieldStatus(id, text, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = color;
+}
 function openApiSettings() {
-  const custom = localStorage.getItem('twelveApiKey');
-  const input = document.getElementById('apikey-input');
-  const status = document.getElementById('apikey-status');
+  const customRapid = localStorage.getItem('yhRapidKey');
+  const customTd = localStorage.getItem('twelveApiKey');
+  const rapidInput = document.getElementById('rapid-input');
+  const tdInput = document.getElementById('apikey-input');
   const resetBtn = document.getElementById('apikey-reset-btn');
-  input.value = custom || '';
-  input.placeholder = TWELVE_DEFAULT_KEY.slice(0, 8) + '… (clé par défaut)';
-  if (custom) {
-    status.textContent = 'Clé personnalisée active.';
-    status.style.color = 'var(--green)';
-    resetBtn.style.display = '';
-  } else {
-    status.textContent = 'Clé par défaut utilisée (partagée, peut être épuisée).';
-    status.style.color = 'var(--gold)';
-    resetBtn.style.display = 'none';
-  }
+
+  rapidInput.value = customRapid || '';
+  rapidInput.placeholder = YH_RAPID_DEFAULT_KEY.slice(0, 10) + '… (clé par défaut)';
+  _setFieldStatus('rapid-status',
+    customRapid ? 'Clé personnalisée active.' : 'Clé par défaut utilisée.',
+    customRapid ? 'var(--green)' : 'var(--gold)');
+
+  tdInput.value = customTd || '';
+  tdInput.placeholder = TWELVE_DEFAULT_KEY.slice(0, 8) + '… (clé par défaut)';
+  _setFieldStatus('apikey-status',
+    customTd ? 'Clé personnalisée active.' : 'Clé par défaut utilisée (partagée, peut être épuisée).',
+    customTd ? 'var(--green)' : 'var(--gold)');
+
+  resetBtn.style.display = (customRapid || customTd) ? '' : 'none';
   document.getElementById('ovApiKey').classList.add('open');
-  setTimeout(() => input.focus(), 80);
+  setTimeout(() => rapidInput.focus(), 80);
 }
 function closeApiSettings() {
   document.getElementById('ovApiKey').classList.remove('open');
 }
 function saveApiKey() {
-  const val = document.getElementById('apikey-input').value.trim();
-  if (!val) { closeApiSettings(); return; }
-  if (val.length < 20) {
-    const s = document.getElementById('apikey-status');
-    s.textContent = '⚠ Clé trop courte — vérifiez la valeur copiée.';
-    s.style.color = 'var(--red)';
+  const rapidVal = document.getElementById('rapid-input').value.trim();
+  const tdVal = document.getElementById('apikey-input').value.trim();
+  if (rapidVal && rapidVal.length < 20) {
+    _setFieldStatus('rapid-status', '⚠ Clé trop courte — vérifiez la valeur copiée.', 'var(--red)');
     return;
   }
-  localStorage.setItem('twelveApiKey', val);
+  if (tdVal && tdVal.length < 20) {
+    _setFieldStatus('apikey-status', '⚠ Clé trop courte — vérifiez la valeur copiée.', 'var(--red)');
+    return;
+  }
+  if (rapidVal) localStorage.setItem('yhRapidKey', rapidVal); else localStorage.removeItem('yhRapidKey');
+  if (tdVal) localStorage.setItem('twelveApiKey', tdVal); else localStorage.removeItem('twelveApiKey');
   closeApiSettings();
-  document.getElementById('sb-apikey-btn').style.color = 'var(--green)';
+  _updateSbApiBtn();
 }
 function resetApiKey() {
+  localStorage.removeItem('yhRapidKey');
   localStorage.removeItem('twelveApiKey');
   closeApiSettings();
-  document.getElementById('sb-apikey-btn').style.color = '';
+  _updateSbApiBtn();
+}
+function _updateSbApiBtn() {
+  const btn = document.getElementById('sb-apikey-btn');
+  if (!btn) return;
+  btn.style.color = (localStorage.getItem('yhRapidKey') || localStorage.getItem('twelveApiKey')) ? 'var(--green)' : '';
 }
 
 // ─── EXPORT / IMPORT ────────────────────────────────────────────────────────────
