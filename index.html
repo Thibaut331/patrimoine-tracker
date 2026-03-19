@@ -1153,30 +1153,39 @@ async function _yhRapidBatch(tickers) {
   if (!tickers.length) return {};
   const key = getYhRapidKey();
   if (!key) return {};
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), 10000);
-  try {
-    const url = `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/quote?ticker=${encodeURIComponent(tickers.join(','))}&type=STOCKS`;
-    const r = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' }
-    });
-    clearTimeout(tid);
-    if (!r.ok) return {};
-    const d = await r.json();
-    const out = {};
-    // Format objet { body: { "TTE.PA": { regularMarketPrice: ... } } }
-    if (d?.body && typeof d.body === 'object' && !Array.isArray(d.body)) {
-      for (const [sym, q] of Object.entries(d.body)) {
-        if (q?.regularMarketPrice != null) out[sym] = q.regularMarketPrice;
+  // Essaie deux variantes d'URL (l'API est inconsistante dans sa doc)
+  const urls = [
+    `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/quote?ticker=${encodeURIComponent(tickers.join(','))}`,
+    `https://yahoo-finance15.p.rapidapi.com/api/v1/market/quotes?ticker=${encodeURIComponent(tickers.join(','))}`,
+  ];
+  for (const url of urls) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      const r = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' }
+      });
+      clearTimeout(tid);
+      if (!r.ok) { console.warn('[RapidAPI] HTTP', r.status, url); continue; }
+      const d = await r.json();
+      console.log('[RapidAPI] response:', JSON.stringify(d).slice(0, 300));
+      const out = {};
+      // Format objet { body: { "TTE.PA": { regularMarketPrice: ... } } }
+      if (d?.body && typeof d.body === 'object' && !Array.isArray(d.body)) {
+        for (const [sym, q] of Object.entries(d.body)) {
+          if (q?.regularMarketPrice != null) out[sym] = q.regularMarketPrice;
+        }
       }
-    }
-    // Format tableau { body: [ { symbol, regularMarketPrice } ] }
-    if (d?.body && Array.isArray(d.body)) {
-      d.body.forEach(q => { if (q?.symbol && q.regularMarketPrice != null) out[q.symbol] = q.regularMarketPrice; });
-    }
-    return out;
-  } catch(e) { clearTimeout(tid); return {}; }
+      // Format tableau { body: [ { symbol, regularMarketPrice } ] }
+      if (d?.body && Array.isArray(d.body)) {
+        d.body.forEach(q => { if (q?.symbol && q.regularMarketPrice != null) out[q.symbol] = q.regularMarketPrice; });
+      }
+      if (Object.keys(out).length > 0) return out;
+      console.warn('[RapidAPI] réponse vide ou format inattendu:', d);
+    } catch(e) { clearTimeout(tid); console.warn('[RapidAPI] erreur:', e.message); }
+  }
+  return {};
 }
 
 // Batch Yahoo Finance via proxy CORS — une seule requête pour plusieurs tickers
