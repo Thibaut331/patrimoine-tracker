@@ -266,9 +266,6 @@ tbody td{padding:10px 10px;vertical-align:middle;}
   <div class="page" id="page-actifs">
     <div class="g4" style="margin-bottom:14px">
       <div class="metric"><div class="metric-label">Nombre d'actifs</div><div class="metric-val" id="a-count">—</div></div>
-      <div class="metric"><div class="metric-label">Plus-value totale</div><div class="metric-val" id="a-pv">—</div></div>
-      <div class="metric"><div class="metric-label">Rendement moyen</div><div class="metric-val" id="a-rdt">—</div></div>
-      <div class="metric"><div class="metric-label">Meilleur actif</div><div class="metric-val" id="a-best" style="font-size:.85rem">—</div></div>
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -705,17 +702,8 @@ function renderActifs() {
   const list = filter ? state.actifs.filter(a => a.cat === filter) : state.actifs;
   E('a-count').textContent = state.actifs.length;
 
-  const pvTot = state.actifs.reduce((s,a) => a.pr ? s+(netVal(a)-a.pr) : s, 0);
-  const pvEl = E('a-pv'); pvEl.textContent = fmt(pvTot); pvEl.style.color = pvTot >= 0 ? 'var(--green)' : 'var(--red)';
-
-  const rdts = state.actifs.filter(a => a.rdt > 0);
-  E('a-rdt').textContent = rdts.length ? fmtP(rdts.reduce((s,a)=>s+a.rdt,0)/rdts.length) : '—';
-
-  const best = state.actifs.filter(a=>a.pr>0).sort((a,b)=>(netVal(b)-b.pr)-(netVal(a)-a.pr))[0];
-  E('a-best').textContent = best ? best.nom : '—';
-
   const catLabel = {bourse:'Bourse',immo:'Immobilier',epargne:'Épargne',autres:'Autres'};
-  let html = `<table><thead><tr><th>Actif</th><th>Catégorie</th><th>Établissement</th><th>Valeur nette</th><th>Prix revient</th><th>Plus-value</th><th>Rendement</th><th>Évol.</th><th></th></tr></thead><tbody>`;
+  let html = `<table><thead><tr><th>Actif</th><th>Catégorie</th><th>Établissement</th><th>Valeur nette</th><th>Évol.</th><th></th></tr></thead><tbody>`;
 
   list.forEach(a => {
     const nv = netVal(a);
@@ -739,9 +727,6 @@ function renderActifs() {
       <td><span class="pill pill-${a.cat}">${catLabel[a.cat]}</span></td>
       <td><span class="vmut">${a.etab||'—'}</span></td>
       <td><strong>${fmt(nv)}</strong></td>
-      <td>${a.pr?fmt(a.pr):'<span class="vmut">—</span>'}</td>
-      <td>${pvHtml}</td>
-      <td>${a.rdt?fmtP(a.rdt):'<span class="vmut">—</span>'}</td>
       <td>${varHtml}</td>
       <td><div class="btn-row" onclick="event.stopPropagation()"><button class="ico-btn" onclick="openHist('${a.id}')">&#9654;</button></div></td>
     </tr>`;
